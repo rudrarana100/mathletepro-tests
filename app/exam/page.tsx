@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -9,7 +10,6 @@ import { Label } from "@/components/ui/label";
 import 'katex/dist/katex.min.css';
 import { InlineMath } from "react-katex";
 
-// 1. Fix for the 'any' error: Define a proper type for TypeScript
 type QuestionRecord = {
   id: string;
   statement: string;
@@ -19,17 +19,18 @@ type QuestionRecord = {
 
 export default function ExamPage() {
   const supabase = createClient();
+  const router = useRouter();
   const [questions, setQuestions] = useState<QuestionRecord[]>([]);
   const [currentQ, setCurrentQ] = useState(0);
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [timeLeft, setTimeLeft] = useState(3600); // 60 minutes
   const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     const fetchExamData = async () => {
       const { data, error } = await supabase.from("questions").select("*");
       
-      // 2. Fix for the unused 'error' variable: Log it if it happens
       if (error) console.error("Error fetching questions:", error);
       if (data) setQuestions(data as QuestionRecord[]);
 
@@ -42,7 +43,7 @@ export default function ExamPage() {
       setIsLoading(false);
     };
     fetchExamData();
-  }, [supabase]); // 3. Fix for missing dependency: added supabase here
+  }, [supabase]); 
 
   useEffect(() => {
     if (isLoading) return;
@@ -77,6 +78,28 @@ export default function ExamPage() {
       }
       return <span key={i}>{part}</span>;
     });
+  };
+
+  const submitExam = async () => {
+    setIsSubmitting(true);
+    try {
+      const res = await fetch('/api/submit', {
+        method: 'POST',
+        body: JSON.stringify({ answers })
+      });
+      const resultData = await res.json();
+      
+      // Clear the active exam cache and save the final result
+      localStorage.removeItem("exam_answers");
+      localStorage.removeItem("exam_time");
+      localStorage.setItem("final_result", JSON.stringify(resultData));
+      
+      // Redirect to the Results page
+      router.push('/results');
+    } catch (err) {
+      console.error("Submission failed", err);
+      setIsSubmitting(false);
+    }
   };
 
   if (isLoading) return <div className="flex h-screen items-center justify-center font-bold text-xl">Loading Exam Engine...</div>;
@@ -117,7 +140,9 @@ export default function ExamPage() {
                   Previous
                 </Button>
                 {currentQ === questions.length - 1 ? (
-                  <Button onClick={() => alert("Final Answers Ready for Submission: " + JSON.stringify(answers))}>Submit Exam</Button>
+                  <Button onClick={submitExam} disabled={isSubmitting}>
+                    {isSubmitting ? "Submitting..." : "Submit Exam"}
+                  </Button>
                 ) : (
                   <Button onClick={() => setCurrentQ(prev => prev + 1)}>Save & Next</Button>
                 )}

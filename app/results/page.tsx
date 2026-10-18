@@ -5,13 +5,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 
-// Define the exact shape of the results to clear the 'any' error
 type ResultData = {
-  score: number;
-  totalAttempted: number;
-  totalQuestions: number;
-  correctCount: number;
-  incorrectCount: number;
+  score?: number;
+  totalAttempted?: number;
+  totalQuestions?: number;
+  correctCount?: number;
+  incorrectCount?: number;
+  error?: string;
+  details?: string;
 };
 
 export default function ResultsPage() {
@@ -25,6 +26,28 @@ export default function ResultsPage() {
   }, []);
 
   if (!result) return <div className="flex h-screen items-center justify-center">Calculating results...</div>;
+
+  // NEW: If the API threw an error, render it clearly on the screen
+  if (result.error) {
+    return (
+      <div className="container mx-auto p-8 max-w-3xl mt-10">
+        <Card className="border-destructive p-6">
+          <CardHeader>
+            <CardTitle className="text-2xl text-destructive font-bold">API Submission Failed</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="bg-muted p-4 rounded-md font-mono text-sm overflow-auto text-red-400">
+              {result.error} <br/>
+              {result.details}
+            </div>
+            <Link href="/exam">
+              <Button variant="outline" className="w-full">Go back to Exam</Button>
+            </Link>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="container mx-auto p-8 max-w-3xl mt-10">
