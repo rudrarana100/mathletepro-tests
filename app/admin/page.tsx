@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -9,62 +9,86 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import * as XLSX from "xlsx";
 
+interface Test {
+  id: string;
+  title: string;
+  duration_minutes: number;
+}
+
 export default function AdminPage() {
   const supabase = createClient();
   const router = useRouter();
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   
-  const [isUploadingBulk, setIsUploadingBulk] = useState(false);
-  const [isSubmittingManual, setIsSubmittingManual] = useState(false);
+  const [tests, setTests] = useState<Test[]>([]);
+  const [selectedTestId, setSelectedTestId] = useState("");
+  const [newTestTitle, setNewTestTitle] = useState("");
+  const [newTestDuration, setNewTestDuration] = useState("60");
 
-  const [manualForm, setManualForm] = useState({
-    statement: "",
-    optA: "",
-    optB: "",
-    optC: "",
-    optD: "",
-    correct: "A",
-    solution: ""
-  });
+  const [isUploadingBulk, setIsUploadingBulk] = useState(false);
+
+  const fetchTests = useCallback(async () => {
+    // Removed order('created_at') to match your actual database schema
+    const { data, error } = await supabase
+      .from("tests")
+      .select("*");
+    
+    if (!error && data) setTests(data as Test[]);
+    setIsLoading(false);
+  }, [supabase]);
 
   useEffect(() => {
-    const checkAdmin = async () => {
+    const initializeAdmin = async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user || user.email !== "test@gmail.com") { 
-        router.push("/");
-      } else {
-        setIsAdmin(true);
+      if (!user) {
+        router.push("/auth/login");
+        return;
       }
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .single();
+
+      if (profile?.role !== "admin") {
+        alert("Access Denied: You are not an admin.");
+        router.push("/dashboard"); 
+        return;
+      }
+
+      setIsAdmin(true);
+      fetchTests();
     };
-    checkAdmin();
-  }, [router, supabase]);
 
-  const handleManualSubmit = async (e: React.FormEvent) => {
+    initializeAdmin();
+  }, [router, supabase, fetchTests]);
+
+  const handleCreateTest = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsSubmittingManual(true);
-    
-    try {
-      const optionMap: Record<string, number> = { 'A': 0, 'B': 1, 'C': 2, 'D': 3 };
-      const formattedQuestion = {
-        statement: manualForm.statement,
-        options: JSON.stringify([manualForm.optA, manualForm.optB, manualForm.optC, manualForm.optD]),
-        correct_option_index: optionMap[manualForm.correct],
-        solution: manualForm.solution
-      };
+    // Removed is_published to match your actual database schema
+    const { error } = await supabase.from("tests").insert([{ 
+      title: newTestTitle, 
+      duration_minutes: parseInt(newTestDuration, 10)
+    }]);
 
-      const { error } = await supabase.from("questions").insert([formattedQuestion]);
-      if (error) throw error;
-
-      alert("Question added successfully!");
-      setManualForm({ statement: "", optA: "", optB: "", optC: "", optD: "", correct: "A", solution: "" });
-    } catch (err) {
-      alert("Failed to add question: " + (err as Error).message);
-    } finally {
-      setIsSubmittingManual(false);
+    if (error) {
+      alert("Failed to create test: " + error.message);
+    } else {
+      setNewTestTitle("");
+      fetchTests();
+      alert("Test Created Successfully!");
     }
   };
 
   const handleExcelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!selectedTestId) {
+      alert("Please select a Test Series first before uploading!");
+      e.target.value = "";
+      return;
+    }
+
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -76,135 +100,116 @@ export default function AdminPage() {
         const data = new Uint8Array(event.target?.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: "array" });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        
         const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet);
 
-        const optionMap: Record<string, number> = { 'A': 0, 'B': 1, 'C': 2, 'D': 3 };
+        const optionMap: Record<string, number> = { A: 0, B: 1, C: 2, D: 3 };
 
         const formattedQuestions = json.map((row, index) => {
-          const correctChar = String(row['Correct Answer']).trim().toUpperCase();
+          const correctChar = String(row["Correct Answer"] || "").trim().toUpperCase();
           const correctIndex = optionMap[correctChar];
-
-          if (correctIndex === undefined) throw new Error(`Row ${index + 2}: Correct Answer must be A, B, C, or D`);
+          if (correctIndex === undefined) {
+            throw new Error(`Row ${index + 2}: Correct Answer must be A, B, C, or D`);
+          }
 
           return {
-            statement: String(row['Question']),
+            test_id: selectedTestId,
+            statement: String(row["Question"] || ""),
             options: JSON.stringify([
-              String(row['Option A'] || ""), 
-              String(row['Option B'] || ""), 
-              String(row['Option C'] || ""), 
-              String(row['Option D'] || "")
+              String(row["Option A"] || ""), 
+              String(row["Option B"] || ""), 
+              String(row["Option C"] || ""), 
+              String(row["Option D"] || "")
             ]),
             correct_option_index: correctIndex,
-            solution: row['Solution'] ? String(row['Solution']) : ""
+            solution: row["Solution"] ? String(row["Solution"]) : ""
           };
         });
 
         const { error } = await supabase.from("questions").insert(formattedQuestions);
         if (error) throw error;
         
-        alert(`Success! Imported ${formattedQuestions.length} questions from Excel.`);
+        alert(`Success! Imported ${formattedQuestions.length} questions into the selected test.`);
       } catch (err) {
         alert("Upload Failed: " + (err as Error).message);
       } finally {
         setIsUploadingBulk(false);
-        e.target.value = '';
+        e.target.value = ""; 
       }
     };
     reader.readAsArrayBuffer(file);
   };
 
-  if (!isAdmin) return <div className="flex h-screen items-center justify-center font-bold">Verifying Admin...</div>;
+  if (isLoading) return <div className="flex h-screen items-center justify-center font-bold bg-black text-white">Loading Admin Portal...</div>;
+  if (!isAdmin) return null;
 
   return (
-    <div className="container mx-auto p-4 md:p-8 max-w-6xl mt-4 grid md:grid-cols-2 gap-8">
-      
-      <Card className="border-primary/50 shadow-md">
-        <CardHeader>
-          <CardTitle className="text-2xl">Manual Entry</CardTitle>
-          <CardDescription>Add a single question instantly.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleManualSubmit} className="space-y-4">
+    <div className="min-h-screen bg-black text-zinc-100 p-4 md:p-8 font-sans">
+      <div className="max-w-5xl mx-auto space-y-8 mt-4">
+        
+        <header className="border-b border-zinc-800 pb-6 mb-8">
+          <h1 className="text-4xl font-bold tracking-tight">Faculty Dashboard</h1>
+          <p className="text-zinc-500 mt-2 text-xs uppercase tracking-widest font-semibold">
+            Manage Test Series and Question Banks
+          </p>
+        </header>
+
+        <Card className="bg-zinc-950 border-zinc-800 rounded-none">
+          <CardHeader>
+            <CardTitle className="text-2xl">1. Create Test Series</CardTitle>
+            <CardDescription className="text-zinc-500">Create a new exam container before adding questions.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleCreateTest} className="flex flex-col md:flex-row gap-4 items-end">
+              <div className="space-y-2 flex-1 w-full">
+                <Label>Test Title (e.g., Math Mock 1)</Label>
+                <Input required value={newTestTitle} onChange={e => setNewTestTitle(e.target.value)} className="bg-black border-zinc-800 rounded-none" />
+              </div>
+              <div className="space-y-2 w-full md:w-32">
+                <Label>Duration (mins)</Label>
+                <Input required type="number" value={newTestDuration} onChange={e => setNewTestDuration(e.target.value)} className="bg-black border-zinc-800 rounded-none" />
+              </div>
+              <Button type="submit" className="h-10 rounded-none bg-white text-black hover:bg-zinc-200 font-bold w-full md:w-auto">Create Test</Button>
+            </form>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-zinc-950 border-zinc-800 rounded-none">
+          <CardHeader>
+            <CardTitle className="text-2xl">2. Upload Question Bank</CardTitle>
+            <CardDescription className="text-zinc-500">Select a test and upload your Excel sheet.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            
             <div className="space-y-2">
-              <Label>Question Statement (LaTeX supported)</Label>
-              <textarea 
-                required
-                className="w-full min-h-[100px] flex rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                placeholder="What is $\int x^2 dx$?"
-                value={manualForm.statement}
-                onChange={e => setManualForm({...manualForm, statement: e.target.value})}
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2"><Label>Option A</Label><Input required value={manualForm.optA} onChange={e => setManualForm({...manualForm, optA: e.target.value})} /></div>
-              <div className="space-y-2"><Label>Option B</Label><Input required value={manualForm.optB} onChange={e => setManualForm({...manualForm, optB: e.target.value})} /></div>
-              <div className="space-y-2"><Label>Option C</Label><Input required value={manualForm.optC} onChange={e => setManualForm({...manualForm, optC: e.target.value})} /></div>
-              <div className="space-y-2"><Label>Option D</Label><Input required value={manualForm.optD} onChange={e => setManualForm({...manualForm, optD: e.target.value})} /></div>
-            </div>
-
-            <div className="space-y-2 pt-2">
-              <Label>Correct Answer</Label>
+              <Label className="text-lg font-bold">Select Target Test</Label>
               <select 
-                className="w-full flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                value={manualForm.correct}
-                onChange={e => setManualForm({...manualForm, correct: e.target.value})}
+                className="w-full flex h-10 border border-zinc-800 bg-black px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white rounded-none"
+                value={selectedTestId}
+                onChange={e => setSelectedTestId(e.target.value)}
               >
-                <option value="A">A</option>
-                <option value="B">B</option>
-                <option value="C">C</option>
-                <option value="D">D</option>
+                <option value="" disabled>-- Choose a test to upload questions into --</option>
+                {tests.map(test => (
+                  <option key={test.id} value={test.id}>{test.title} ({test.duration_minutes} mins)</option>
+                ))}
               </select>
             </div>
 
-            <div className="space-y-2 pt-2">
-              <Label>Solution Explanation (Optional)</Label>
-              <textarea 
-                className="w-full min-h-[80px] flex rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                placeholder="Explanation or formulas..."
-                value={manualForm.solution}
-                onChange={e => setManualForm({...manualForm, solution: e.target.value})}
-              />
-            </div>
-
-            <Button type="submit" className="w-full mt-4" disabled={isSubmittingManual}>
-              {isSubmittingManual ? "Saving..." : "Add Question"}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-
-      <div className="space-y-8">
-        <Card className="border-secondary shadow-md">
-          <CardHeader>
-            <CardTitle className="text-2xl">Bulk Upload</CardTitle>
-            <CardDescription>Upload an Excel sheet (.xlsx) with hundreds of questions.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="p-6 border rounded-lg bg-secondary/20">
+            <div className={`p-6 border transition-colors rounded-none ${selectedTestId ? "bg-zinc-900 border-zinc-700" : "bg-black border-zinc-900 opacity-50"}`}>
+              <Label className="mb-2 block">Upload Excel (.xlsx)</Label>
               <Input 
                 type="file" 
                 accept=".xlsx, .xls" 
                 onChange={handleExcelUpload} 
-                disabled={isUploadingBulk}
-                className="cursor-pointer"
+                disabled={isUploadingBulk || !selectedTestId}
+                className="cursor-pointer bg-black border-zinc-800 rounded-none"
               />
-              {isUploadingBulk && <p className="text-sm text-primary mt-3 font-bold animate-pulse">Processing & Uploading...</p>}
+              {isUploadingBulk && <p className="text-sm text-white mt-3 font-bold animate-pulse">Processing & Uploading...</p>}
             </div>
 
-            <div className="p-4 bg-muted/50 text-sm rounded-md border">
-              <p className="font-bold text-foreground mb-2">Excel Sheet Format Rules:</p>
-              <ul className="list-disc pl-5 space-y-2 text-muted-foreground">
-                <li>Headers must be exactly: <b>Question, Option A, Option B, Option C, Option D, Correct Answer, Solution</b></li>
-                <li><b>Correct Answer</b> must be strictly <b>A, B, C, or D</b></li>
-                <li>Wrap math in `$` signs (e.g., `$x^2$`) for proper formatting.</li>
-              </ul>
-            </div>
           </CardContent>
         </Card>
-      </div>
 
+      </div>
     </div>
   );
 }
