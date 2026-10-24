@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -17,9 +17,12 @@ type QuestionRecord = {
   [key: string]: unknown;
 };
 
-export default function ExamPage() {
+function ExamEngineContent() {
   const supabase = createClient();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const testId = searchParams.get("testId");
+
   const [questions, setQuestions] = useState<QuestionRecord[]>([]);
   const [currentQ, setCurrentQ] = useState(0);
   const [answers, setAnswers] = useState<Record<number, string>>({});
@@ -29,10 +32,26 @@ export default function ExamPage() {
 
   useEffect(() => {
     const fetchExamData = async () => {
-      const { data, error } = await supabase.from("questions").select("*");
-      
-      if (error) console.error("Error fetching questions:", error);
-      if (data) setQuestions(data as QuestionRecord[]);
+      let fetchedQuestions: QuestionRecord[] = [];
+
+      if (testId) {
+        const { data: testQuestions } = await supabase
+          .from("questions")
+          .select("*")
+          .eq("test_id", testId);
+
+        if (testQuestions && testQuestions.length > 0) {
+          fetchedQuestions = testQuestions as QuestionRecord[];
+        }
+      }
+
+      if (fetchedQuestions.length === 0) {
+        const { data, error } = await supabase.from("questions").select("*");
+        if (error) console.error("Error fetching questions:", error);
+        if (data) fetchedQuestions = data as QuestionRecord[];
+      }
+
+      setQuestions(fetchedQuestions);
 
       const savedAnswers = localStorage.getItem("exam_answers");
       const savedTime = localStorage.getItem("exam_time");
@@ -43,7 +62,7 @@ export default function ExamPage() {
       setIsLoading(false);
     };
     fetchExamData();
-  }, [supabase]); 
+  }, [supabase, testId]); 
 
   useEffect(() => {
     if (isLoading) return;
@@ -83,9 +102,10 @@ export default function ExamPage() {
   const submitExam = async () => {
     setIsSubmitting(true);
     try {
-      const res = await fetch('/api/submit', {
+      const res = await fetch('/api/submit-exam', {
         method: 'POST',
-        body: JSON.stringify({ answers })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ testId, answers })
       });
       const resultData = await res.json();
       
@@ -95,7 +115,11 @@ export default function ExamPage() {
       localStorage.setItem("final_result", JSON.stringify(resultData));
       
       // Redirect to the Results page
-      router.push('/results');
+      if (resultData?.resultId) {
+        router.push(`/results?resultId=${resultData.resultId}`);
+      } else {
+        router.push('/results');
+      }
     } catch (err) {
       console.error("Submission failed", err);
       setIsSubmitting(false);
@@ -170,5 +194,19 @@ export default function ExamPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function ExamPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-screen items-center justify-center font-mono text-xs uppercase tracking-widest text-zinc-400">
+          Loading Examination Engine...
+        </div>
+      }
+    >
+      <ExamEngineContent />
+    </Suspense>
   );
 }
