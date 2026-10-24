@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle,CardDescription } from "@/components/ui/card";
+import AppSidebar from "@/components/AppSidebar";
 
 interface Test {
   id: string;
@@ -19,7 +20,6 @@ export default function Dashboard() {
 
   useEffect(() => {
     const loadTests = async () => {
-      // Fetching all tests directly without the missing 'is_published' filter
       const { data, error } = await supabase.from("tests").select("*");
       if (!error && data) {
         setTests(data);
@@ -32,8 +32,8 @@ export default function Dashboard() {
   if (isLoading) return <div className="flex h-screen items-center justify-center bg-black text-white font-bold tracking-widest uppercase text-sm animate-pulse">Loading Portal...</div>;
 
   return (
-    <div className="min-h-screen bg-black text-zinc-100 p-4 md:p-8 font-sans">
-      <div className="max-w-5xl mx-auto space-y-8 mt-4">
+    <AppSidebar>
+      <div className="max-w-5xl mx-auto space-y-8">
         
         <header className="border-b border-zinc-800 pb-6 mb-8">
           <h1 className="text-4xl font-bold tracking-tight">Student Portal</h1>
@@ -65,6 +65,6 @@ export default function Dashboard() {
         )}
 
       </div>
-    </div>
+    </AppSidebar>
   );
 }

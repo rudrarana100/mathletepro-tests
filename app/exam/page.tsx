@@ -119,30 +119,38 @@ function ExamEngineContent() {
     setReview({ ...review, [currentQId]: !review[currentQId] });
   };
 
-  // 4. Clean up Local Storage on Submit
-const handleSubmit = async () => {
+  // 4. Bulletproof Submit Function with Error Handling
+  const handleSubmit = async () => {
     if (isSubmitting.current) return;
     isSubmitting.current = true;
     
-    // Get the current user
-    const { data: { user } } = await supabase.auth.getUser();
-    
-    // Send to our new grading API
-    const res = await fetch("/api/submit-exam", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ testId, userId: user?.id, answers })
-    });
-    
-    const data = await res.json();
-    
-    // Destroy in-progress cache so they can't resume a submitted test
-    localStorage.removeItem(`answers_${testId}`);
-    localStorage.removeItem(`review_${testId}`);
-    localStorage.removeItem(`time_${testId}`);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      const res = await fetch("/api/submit-exam", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ testId, userId: user?.id, answers })
+      });
+      
+      const data = await res.json();
+      
+      // If the API fails, show the exact error and STOP
+      if (data.error || !data.resultId) {
+        alert("API Error: " + (data.error || "Failed to generate result ID"));
+        isSubmitting.current = false; // unlock button so you can try again
+        return; 
+      }
+      
+      localStorage.removeItem(`answers_${testId}`);
+      localStorage.removeItem(`review_${testId}`);
+      localStorage.removeItem(`time_${testId}`);
 
-    // Route to the new analytics dashboard
-    router.push(`/results?resultId=${data.resultId}`); 
+      router.push(`/results?resultId=${data.resultId}`); 
+    } catch  {
+      alert("Network Error: Could not reach the scoring server.");
+      isSubmitting.current = false;
+    }
   };
 
   if (isLoading) return <div className="flex h-screen items-center justify-center bg-black text-white font-bold tracking-widest uppercase text-sm animate-pulse">Initializing Engine...</div>;
