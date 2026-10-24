@@ -1,20 +1,14 @@
-import type { Metadata } from "next";
 import "./globals.css";
+// ... your other imports ...
 
-export const metadata: Metadata = {
-  title: "Mathlete Pro Gym",
-  description: "Online Mathematics Practice & Examination",
-};
-
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    // We added className="dark" here to permanently lock in your preferred theme
-    <html lang="en" className="dark" suppressHydrationWarning>
-      <body className="antialiased bg-background text-foreground">
+    <html lang="en">
+      <head>
+        {/* Add this exact line to pull in the official math fonts and structural CSS */}
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css" />
+      </head>
+      <body className="bg-black text-white">
         {children}
       </body>
     </html>

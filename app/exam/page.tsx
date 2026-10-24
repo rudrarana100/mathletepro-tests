@@ -1,197 +1,254 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useEffect, useState, Suspense, useRef } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Label } from "@/components/ui/label";
-import 'katex/dist/katex.min.css';
-import { InlineMath } from "react-katex";
 
-type QuestionRecord = {
+import 'katex/dist/katex.min.css';
+import Latex from 'react-latex-next';
+
+interface Question {
   id: string;
   statement: string;
-  options: string | string[];
-  [key: string]: unknown;
-};
+  options: string;
+  correct_option_index: number;
+}
 
 function ExamEngineContent() {
-  const supabase = createClient();
-  const router = useRouter();
   const searchParams = useSearchParams();
   const testId = searchParams.get("testId");
+  const router = useRouter();
+  const supabase = createClient();
 
-  const [questions, setQuestions] = useState<QuestionRecord[]>([]);
-  const [currentQ, setCurrentQ] = useState(0);
-  const [answers, setAnswers] = useState<Record<number, string>>({});
-  const [timeLeft, setTimeLeft] = useState(3600); // 60 minutes
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  
+  const [answers, setAnswers] = useState<Record<string, number>>({});
+  const [review, setReview] = useState<Record<string, boolean>>({});
+  
   const [isLoading, setIsLoading] = useState(true);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [timeLeft, setTimeLeft] = useState<number | null>(null);
+  
+  const isSubmitting = useRef(false);
 
+  // 1. Initial Load & Recovery from Local Storage
   useEffect(() => {
-    const fetchExamData = async () => {
-      let fetchedQuestions: QuestionRecord[] = [];
+    if (!testId) {
+      alert("No test selected.");
+      router.push("/dashboard");
+      return;
+    }
 
-      if (testId) {
-        const { data: testQuestions } = await supabase
-          .from("questions")
-          .select("*")
-          .eq("test_id", testId);
+    const loadTest = async () => {
+      // Recover Answers and Review status
+      const savedAnswers = localStorage.getItem(`answers_${testId}`);
+      if (savedAnswers) setAnswers(JSON.parse(savedAnswers));
 
-        if (testQuestions && testQuestions.length > 0) {
-          fetchedQuestions = testQuestions as QuestionRecord[];
+      const savedReview = localStorage.getItem(`review_${testId}`);
+      if (savedReview) setReview(JSON.parse(savedReview));
+
+      // Recover Timer or start fresh
+      const { data: testData } = await supabase.from("tests").select("duration_minutes").eq("id", testId).single();
+      if (testData) {
+        const savedTime = localStorage.getItem(`time_${testId}`);
+        if (savedTime) {
+          setTimeLeft(parseInt(savedTime, 10));
+        } else {
+          setTimeLeft(testData.duration_minutes * 60);
         }
       }
 
-      if (fetchedQuestions.length === 0) {
-        const { data, error } = await supabase.from("questions").select("*");
-        if (error) console.error("Error fetching questions:", error);
-        if (data) fetchedQuestions = data as QuestionRecord[];
+      // Fetch questions
+      const { data: qData, error } = await supabase
+        .from("questions")
+        .select("*")
+        .eq("test_id", testId);
+
+      if (!error && qData) {
+        setQuestions(qData);
       }
-
-      setQuestions(fetchedQuestions);
-
-      const savedAnswers = localStorage.getItem("exam_answers");
-      const savedTime = localStorage.getItem("exam_time");
-      
-      if (savedAnswers) setAnswers(JSON.parse(savedAnswers));
-      if (savedTime) setTimeLeft(parseInt(savedTime, 10));
-      
       setIsLoading(false);
     };
-    fetchExamData();
-  }, [supabase, testId]); 
 
+    loadTest();
+  }, [testId, router, supabase]);
+
+  // 2. Save Progress on Every Change
   useEffect(() => {
-    if (isLoading) return;
+    if (testId && !isLoading) {
+      localStorage.setItem(`answers_${testId}`, JSON.stringify(answers));
+      localStorage.setItem(`review_${testId}`, JSON.stringify(review));
+    }
+  }, [answers, review, testId, isLoading]);
+
+  // 3. Bulletproof Timer (Saves every second)
+  useEffect(() => {
+    if (timeLeft === null || isSubmitting.current) return;
+
+    if (timeLeft <= 0) {
+      alert("Time is up! Submitting exam automatically.");
+      handleSubmit();
+      return;
+    }
+
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
-        const newTime = prev > 0 ? prev - 1 : 0;
-        localStorage.setItem("exam_time", newTime.toString());
+        const newTime = prev !== null && prev > 0 ? prev - 1 : 0;
+        if (testId) localStorage.setItem(`time_${testId}`, newTime.toString());
         return newTime;
       });
     }, 1000);
+
     return () => clearInterval(timer);
-  }, [isLoading]);
+  }, [timeLeft, testId]);
 
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s < 10 ? '0' : ''}${s}`;
+  const handleSelectOption = (qId: string, optIndex: number) => {
+    setAnswers({ ...answers, [qId]: optIndex });
   };
 
-  const handleSelect = (val: string) => {
-    const newAnswers = { ...answers, [currentQ]: val };
+  const handleClearResponse = () => {
+    const currentQId = questions[currentIndex].id;
+    const newAnswers = { ...answers };
+    delete newAnswers[currentQId];
     setAnswers(newAnswers);
-    localStorage.setItem("exam_answers", JSON.stringify(newAnswers));
   };
 
-  const renderMath = (text: string) => {
-    if (!text) return null;
-    const parts = text.split(/(\$.*?\$)/g);
-    return parts.map((part, i) => {
-      if (part.startsWith("$") && part.endsWith("$")) {
-        return <InlineMath key={i} math={part.slice(1, -1)} />;
-      }
-      return <span key={i}>{part}</span>;
-    });
+  const handleMarkReview = () => {
+    const currentQId = questions[currentIndex].id;
+    setReview({ ...review, [currentQId]: !review[currentQId] });
   };
 
-  const submitExam = async () => {
-    setIsSubmitting(true);
-    try {
-      const res = await fetch('/api/submit-exam', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ testId, answers })
-      });
-      const resultData = await res.json();
-      
-      // Clear the active exam cache and save the final result
-      localStorage.removeItem("exam_answers");
-      localStorage.removeItem("exam_time");
-      localStorage.setItem("final_result", JSON.stringify(resultData));
-      
-      // Redirect to the Results page
-      if (resultData?.resultId) {
-        router.push(`/results?resultId=${resultData.resultId}`);
-      } else {
-        router.push('/results');
-      }
-    } catch (err) {
-      console.error("Submission failed", err);
-      setIsSubmitting(false);
-    }
+  // 4. Clean up Local Storage on Submit
+  const handleSubmit = async () => {
+    if (isSubmitting.current) return;
+    isSubmitting.current = true;
+    
+    // Save final results payload
+    localStorage.setItem(`results_${testId}`, JSON.stringify(answers));
+    
+    // Destroy in-progress cache
+    localStorage.removeItem(`answers_${testId}`);
+    localStorage.removeItem(`review_${testId}`);
+    localStorage.removeItem(`time_${testId}`);
+
+    alert("Exam Submitted Successfully.");
+    router.push("/dashboard"); 
   };
 
-  if (isLoading) return <div className="flex h-screen items-center justify-center font-bold text-xl">Loading Exam Engine...</div>;
-  if (questions.length === 0) return <div className="flex h-screen items-center justify-center font-bold text-xl">No questions found. Add some in the Admin panel!</div>;
+  if (isLoading) return <div className="flex h-screen items-center justify-center bg-black text-white font-bold tracking-widest uppercase text-sm animate-pulse">Initializing Engine...</div>;
+  if (questions.length === 0) return <div className="flex h-screen items-center justify-center bg-black text-white font-bold">No questions found for this test.</div>;
 
-  const q = questions[currentQ];
-  const parsedOptions = typeof q.options === 'string' ? JSON.parse(q.options) : q.options;
+  const currentQ = questions[currentIndex];
+  const parsedOptions = JSON.parse(currentQ.options);
 
   return (
-    <div className="container mx-auto p-4 max-w-5xl mt-4">
-      <div className="flex justify-between items-center mb-6 p-4 bg-secondary rounded-lg">
-        <h1 className="text-xl font-bold">Mock Test 1: Core Mathematics</h1>
-        <div className="text-2xl font-mono text-destructive">{formatTime(timeLeft)}</div>
-      </div>
+    <div className="min-h-screen bg-black text-zinc-100 flex flex-col font-sans">
+      <header className="h-16 border-b border-zinc-800 flex items-center justify-between px-6 bg-zinc-950">
+        <div className="font-bold tracking-tight">Mathlete Pro Gym</div>
+        <div className="flex items-center gap-6 text-sm font-medium">
+          <div className="font-mono bg-zinc-900 px-4 py-2 rounded-none border border-zinc-800 text-lg">
+            {timeLeft !== null ? `${Math.floor(timeLeft / 60)}:${String(timeLeft % 60).padStart(2, '0')}` : "00:00"}
+          </div>
+          <Button onClick={handleSubmit} variant="destructive" className="rounded-none font-bold">
+            SUBMIT EXAM
+          </Button>
+        </div>
+      </header>
 
-      <div className="grid md:grid-cols-4 gap-6">
-        <div className="md:col-span-3">
-          <Card>
-            <CardHeader>
-              <CardTitle>Question {currentQ + 1} of {questions.length}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="text-lg p-4 bg-muted/30 rounded-md border">
-                {renderMath(q.statement)}
+      <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-col flex-1 p-8 overflow-y-auto">
+          <div className="max-w-4xl mx-auto w-full flex-1 space-y-8">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4 text-zinc-500 font-bold text-sm tracking-widest uppercase">
+                <span>Question {currentIndex + 1}</span>
+                <span className="w-12 h-[1px] bg-zinc-800"></span>
               </div>
+            </div>
+            
+            <div className="text-2xl font-medium leading-relaxed">
+              <Latex>{currentQ.statement}</Latex>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 pt-6">
+              {parsedOptions.map((opt: string, idx: number) => {
+                const isSelected = answers[currentQ.id] === idx;
+                return (
+                  <button
+                    key={idx}
+                    onClick={() => handleSelectOption(currentQ.id, idx)}
+                    className={`p-5 text-left border rounded-none transition-all duration-200 ${
+                      isSelected 
+                        ? 'border-white bg-zinc-900 text-white shadow-[0_0_10px_rgba(255,255,255,0.05)]' 
+                        : 'border-zinc-800 bg-black text-zinc-400 hover:border-zinc-500 hover:text-zinc-200'
+                    }`}
+                  >
+                    <span className="font-bold mr-4 opacity-50">{String.fromCharCode(65 + idx)}.</span>
+                    <Latex>{opt}</Latex>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="max-w-4xl mx-auto w-full pt-8 flex gap-4 mt-auto">
+            <Button 
+              onClick={handleMarkReview}
+              className={`flex-1 rounded-none font-bold border ${review[currentQ.id] ? 'bg-yellow-600 text-black hover:bg-yellow-500 border-yellow-600' : 'bg-transparent text-white border-zinc-800 hover:bg-zinc-900'}`}
+            >
+              {review[currentQ.id] ? 'UNMARK REVIEW' : 'MARK FOR REVIEW'}
+            </Button>
+            <Button 
+              onClick={handleClearResponse}
+              className="flex-1 rounded-none bg-transparent border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-900 font-bold"
+            >
+              CLEAR RESPONSE
+            </Button>
+            <Button 
+              disabled={currentIndex === questions.length - 1} 
+              onClick={() => setCurrentIndex(prev => prev + 1)}
+              className="flex-[2] rounded-none bg-white text-black hover:bg-zinc-200 font-bold"
+            >
+              SAVE & NEXT
+            </Button>
+          </div>
+        </div>
+
+        <div className="w-80 border-l border-zinc-800 bg-zinc-950 p-6 flex flex-col">
+          <div className="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-6">Question Palette</div>
+          
+          <div className="grid grid-cols-5 gap-2 overflow-y-auto pb-4">
+            {questions.map((q, idx) => {
+              const isAnswered = answers[q.id] !== undefined;
+              const isReviewed = review[q.id];
+              const isCurrent = idx === currentIndex;
               
-              <RadioGroup value={answers[currentQ] || ""} onValueChange={handleSelect} className="space-y-3">
-                {parsedOptions.map((opt: string, i: number) => (
-                  <div key={i} className={`flex items-center space-x-3 p-3 border rounded-md ${answers[currentQ] === i.toString() ? 'border-primary bg-primary/10' : ''}`}>
-                    <RadioGroupItem value={i.toString()} id={`opt-${i}`} />
-                    <Label htmlFor={`opt-${i}`} className="cursor-pointer w-full text-base">{renderMath(opt)}</Label>
-                  </div>
-                ))}
-              </RadioGroup>
+              let btnClass = "border-zinc-800 text-zinc-500 bg-black"; 
+              if (isCurrent) btnClass = "border-white text-white bg-zinc-900 ring-1 ring-white";
+              else if (isAnswered && isReviewed) btnClass = "border-yellow-500 bg-yellow-900/30 text-yellow-500";
+              else if (isAnswered) btnClass = "border-green-500 bg-green-900/30 text-green-500";
+              else if (isReviewed) btnClass = "border-yellow-500 border-dashed text-yellow-500";
 
-              <div className="flex justify-between pt-6">
-                <Button variant="outline" disabled={currentQ === 0} onClick={() => setCurrentQ(prev => prev - 1)}>
-                  Previous
-                </Button>
-                {currentQ === questions.length - 1 ? (
-                  <Button onClick={submitExam} disabled={isSubmitting}>
-                    {isSubmitting ? "Submitting..." : "Submit Exam"}
-                  </Button>
-                ) : (
-                  <Button onClick={() => setCurrentQ(prev => prev + 1)}>Save & Next</Button>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="md:col-span-1">
-          <Card>
-            <CardHeader><CardTitle>Palette</CardTitle></CardHeader>
-            <CardContent className="grid grid-cols-4 gap-2">
-              {questions.map((_, i) => (
-                <Button 
-                  key={i} 
-                  variant={answers[i] ? "default" : "outline"} 
-                  className={`w-full h-10 ${currentQ === i ? 'ring-2 ring-primary ring-offset-2' : ''}`}
-                  onClick={() => setCurrentQ(i)}
+              return (
+                <button
+                  key={idx}
+                  onClick={() => setCurrentIndex(idx)}
+                  className={`h-10 text-sm font-bold border rounded-none transition-colors ${btnClass}`}
                 >
-                  {i + 1}
-                </Button>
-              ))}
-            </CardContent>
-          </Card>
+                  {idx + 1}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mt-auto space-y-3 pt-6 border-t border-zinc-800 text-xs font-medium text-zinc-400">
+            <div className="flex items-center gap-3"><div className="w-4 h-4 border border-green-500 bg-green-900/30"></div> Answered</div>
+            <div className="flex items-center gap-3"><div className="w-4 h-4 border border-yellow-500 border-dashed"></div> Marked for Review</div>
+            <div className="flex items-center gap-3"><div className="w-4 h-4 border border-yellow-500 bg-yellow-900/30"></div> Answered & Marked</div>
+            <div className="flex items-center gap-3"><div className="w-4 h-4 border border-zinc-800 bg-black"></div> Not Visited</div>
+          </div>
         </div>
+
       </div>
     </div>
   );
@@ -199,13 +256,7 @@ function ExamEngineContent() {
 
 export default function ExamPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="flex h-screen items-center justify-center font-mono text-xs uppercase tracking-widest text-zinc-400">
-          Loading Examination Engine...
-        </div>
-      }
-    >
+    <Suspense fallback={<div className="flex h-screen items-center justify-center bg-black text-white">Loading Engine...</div>}>
       <ExamEngineContent />
     </Suspense>
   );
