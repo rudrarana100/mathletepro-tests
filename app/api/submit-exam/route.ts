@@ -1,134 +1,53 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@supabase/supabase-js";
 
-interface QuestionRecord {
-  id: string;
-  correct_option_index: number;
-  test_id?: string | null;
-}
+export const dynamic = 'force-dynamic';
 
-export async function POST(request: Request) {
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!, 
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
+
+export async function POST(req: Request) {
   try {
-    const body = await request.json();
-    const { testId, answers = {} } = body as {
-      testId?: string | null;
-      answers?: Record<string | number, string | number>;
-    };
+    const { testId, userId, answers } = await req.json();
 
-    const supabase = await createClient();
+    // 1. Get test marking scheme
+    const { data: testData } = await supabase.from("tests").select("positive_marks, negative_marks").eq("id", testId).single();
+    
+    // CRITICAL: Using ?? instead of || so that "0" is accepted as a valid negative mark
+    const pos = testData?.positive_marks ?? 4;
+    const neg = testData?.negative_marks ?? 1;
 
-    // Authenticate user to capture student_id
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    // 2. Fetch the correct answers
+    const { data: questions } = await supabase.from("questions").select("id, correct_option_index").eq("test_id", testId);
 
-    // Securely retrieve questions and correct answers from the backend
-    let questions: QuestionRecord[] = [];
-
-    if (testId) {
-      const { data: testQuestions, error: testQError } = await supabase
-        .from("questions")
-        .select("id, correct_option_index, test_id")
-        .eq("test_id", testId);
-
-      if (testQError) {
-        console.error("Error fetching test questions by test_id:", testQError);
-      }
-
-      if (testQuestions && testQuestions.length > 0) {
-        questions = testQuestions as QuestionRecord[];
-      }
-    }
-
-    // Fallback: if no questions found with test_id (or testId not specified), fetch all questions
-    if (questions.length === 0) {
-      const { data: allQuestions, error: allQError } = await supabase
-        .from("questions")
-        .select("id, correct_option_index, test_id");
-
-      if (allQError || !allQuestions) {
-        console.error("Error fetching fallback questions:", allQError);
-        return NextResponse.json(
-          { error: "Failed to fetch validation questions from database" },
-          { status: 500 }
-        );
-      }
-      questions = allQuestions as QuestionRecord[];
-    }
-
-    if (questions.length === 0) {
-      return NextResponse.json(
-        { error: "No exam questions found to evaluate" },
-        { status: 404 }
-      );
-    }
-
-    // Calculate score: +4 for correct, -1 for incorrect, 0 for unattempted
     let score = 0;
-    let totalCorrect = 0;
-    let totalIncorrect = 0;
-    let totalAttempted = 0;
+    let correct = 0;
+    const attempted = Object.keys(answers).length;
 
-    questions.forEach((q, index) => {
-      // Check answers keyed by index, numeric string index, or question UUID
-      const studentAnswer =
-        answers[index] ?? answers[String(index)] ?? answers[q.id];
-
-      if (studentAnswer !== undefined && studentAnswer !== null && studentAnswer !== "") {
-        totalAttempted++;
-        const parsedOption = parseInt(String(studentAnswer), 10);
-
-        if (parsedOption === q.correct_option_index) {
-          score += 4;
-          totalCorrect++;
+    // 3. Grade the exam using the custom marking scheme
+    questions?.forEach((q) => {
+      if (answers[q.id] !== undefined) {
+        if (answers[q.id] === q.correct_option_index) {
+          score += pos;
+          correct += 1;
         } else {
-          score -= 1;
-          totalIncorrect++;
+          score -= neg; // If 'neg' is 0, score doesn't change
         }
       }
     });
 
-    // Save final result to test_results table
-    const resultPayload = {
-      student_id: user?.id ?? null,
-      test_id: testId || null,
-      score,
-      total_attempted: totalAttempted,
-      total_correct: totalCorrect,
-      answers: answers || {},
-    };
+    // 4. Save to database
+    const { data: result, error } = await supabase.from("test_results").insert([
+      { student_id: userId, test_id: testId, score, total_attempted: attempted, total_correct: correct, answers_data: answers }
+    ]).select().single();
 
-    const { data: insertedResult, error: insertError } = await supabase
-      .from("test_results")
-      .insert(resultPayload)
-      .select("id")
-      .single();
-
-    if (insertError) {
-      console.error("Database insert error on test_results:", insertError);
-      return NextResponse.json(
-        {
-          error: "Failed to persist test result to database",
-          details: insertError.message,
-        },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({
-      success: true,
-      resultId: insertedResult.id,
-      score,
-      totalAttempted,
-      totalCorrect,
-      totalIncorrect,
-      totalQuestions: questions.length,
-    });
-  } catch (err) {
-    console.error("Unexpected error in /api/submit-exam:", err);
-    return NextResponse.json(
-      { error: "Internal server error during exam submission" },
-      { status: 500 }
-    );
+    if (error) throw error;
+    return NextResponse.json({ resultId: result.id });
+    
+  } catch (e: unknown) {
+    const errorMessage = e instanceof Error ? e.message : 'An unknown error occurred';
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }

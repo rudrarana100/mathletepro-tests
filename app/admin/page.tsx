@@ -23,17 +23,17 @@ export default function AdminPage() {
   
   const [tests, setTests] = useState<Test[]>([]);
   const [selectedTestId, setSelectedTestId] = useState("");
+  
+  // New States for Marking Scheme
   const [newTestTitle, setNewTestTitle] = useState("");
   const [newTestDuration, setNewTestDuration] = useState("60");
+  const [newPositiveMarks, setNewPositiveMarks] = useState("4");
+  const [newNegativeMarks, setNewNegativeMarks] = useState("1");
 
   const [isUploadingBulk, setIsUploadingBulk] = useState(false);
 
   const fetchTests = useCallback(async () => {
-    // Removed order('created_at') to match your actual database schema
-    const { data, error } = await supabase
-      .from("tests")
-      .select("*");
-    
+    const { data, error } = await supabase.from("tests").select("*");
     if (!error && data) setTests(data as Test[]);
     setIsLoading(false);
   }, [supabase]);
@@ -45,38 +45,33 @@ export default function AdminPage() {
         router.push("/auth/login");
         return;
       }
-
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", user.id)
-        .single();
-
+      const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
       if (profile?.role !== "admin") {
         alert("Access Denied: You are not an admin.");
         router.push("/dashboard"); 
         return;
       }
-
       setIsAdmin(true);
       fetchTests();
     };
-
     initializeAdmin();
   }, [router, supabase, fetchTests]);
 
   const handleCreateTest = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Removed is_published to match your actual database schema
     const { error } = await supabase.from("tests").insert([{ 
       title: newTestTitle, 
-      duration_minutes: parseInt(newTestDuration, 10)
+      duration_minutes: parseInt(newTestDuration, 10),
+      positive_marks: parseFloat(newPositiveMarks),
+      negative_marks: parseFloat(newNegativeMarks)
     }]);
 
     if (error) {
       alert("Failed to create test: " + error.message);
     } else {
       setNewTestTitle("");
+      setNewPositiveMarks("4");
+      setNewNegativeMarks("1");
       fetchTests();
       alert("Test Created Successfully!");
     }
@@ -88,7 +83,6 @@ export default function AdminPage() {
       e.target.value = "";
       return;
     }
-
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -101,24 +95,19 @@ export default function AdminPage() {
         const workbook = XLSX.read(data, { type: "array" });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
         const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet);
-
         const optionMap: Record<string, number> = { A: 0, B: 1, C: 2, D: 3 };
 
         const formattedQuestions = json.map((row, index) => {
           const correctChar = String(row["Correct Answer"] || "").trim().toUpperCase();
           const correctIndex = optionMap[correctChar];
-          if (correctIndex === undefined) {
-            throw new Error(`Row ${index + 2}: Correct Answer must be A, B, C, or D`);
-          }
+          if (correctIndex === undefined) throw new Error(`Row ${index + 2}: Correct Answer must be A, B, C, or D`);
 
           return {
             test_id: selectedTestId,
             statement: String(row["Question"] || ""),
             options: JSON.stringify([
-              String(row["Option A"] || ""), 
-              String(row["Option B"] || ""), 
-              String(row["Option C"] || ""), 
-              String(row["Option D"] || "")
+              String(row["Option A"] || ""), String(row["Option B"] || ""), 
+              String(row["Option C"] || ""), String(row["Option D"] || "")
             ]),
             correct_option_index: correctIndex,
             solution: row["Solution"] ? String(row["Solution"]) : ""
@@ -127,7 +116,6 @@ export default function AdminPage() {
 
         const { error } = await supabase.from("questions").insert(formattedQuestions);
         if (error) throw error;
-        
         alert(`Success! Imported ${formattedQuestions.length} questions into the selected test.`);
       } catch (err) {
         alert("Upload Failed: " + (err as Error).message);
@@ -148,27 +136,35 @@ export default function AdminPage() {
         
         <header className="border-b border-zinc-800 pb-6 mb-8">
           <h1 className="text-4xl font-bold tracking-tight">Faculty Dashboard</h1>
-          <p className="text-zinc-500 mt-2 text-xs uppercase tracking-widest font-semibold">
-            Manage Test Series and Question Banks
-          </p>
+          <p className="text-zinc-500 mt-2 text-xs uppercase tracking-widest font-semibold">Manage Test Series and Question Banks</p>
         </header>
 
         <Card className="bg-zinc-950 border-zinc-800 rounded-none">
           <CardHeader>
             <CardTitle className="text-2xl">1. Create Test Series</CardTitle>
-            <CardDescription className="text-zinc-500">Create a new exam container before adding questions.</CardDescription>
+            <CardDescription className="text-zinc-500">Configure your exam details and custom marking scheme.</CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleCreateTest} className="flex flex-col md:flex-row gap-4 items-end">
-              <div className="space-y-2 flex-1 w-full">
-                <Label>Test Title (e.g., Math Mock 1)</Label>
+            <form onSubmit={handleCreateTest} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+              <div className="space-y-2 md:col-span-5">
+                <Label>Test Title</Label>
                 <Input required value={newTestTitle} onChange={e => setNewTestTitle(e.target.value)} className="bg-black border-zinc-800 rounded-none" />
               </div>
-              <div className="space-y-2 w-full md:w-32">
-                <Label>Duration (mins)</Label>
+              <div className="space-y-2 md:col-span-2">
+                <Label>Time (mins)</Label>
                 <Input required type="number" value={newTestDuration} onChange={e => setNewTestDuration(e.target.value)} className="bg-black border-zinc-800 rounded-none" />
               </div>
-              <Button type="submit" className="h-10 rounded-none bg-white text-black hover:bg-zinc-200 font-bold w-full md:w-auto">Create Test</Button>
+              <div className="space-y-2 md:col-span-2">
+                <Label>Correct (+)</Label>
+                <Input required type="number" step="any" value={newPositiveMarks} onChange={e => setNewPositiveMarks(e.target.value)} className="bg-black border-zinc-800 rounded-none" />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label>Wrong (-)</Label>
+                <Input required type="number" step="any" value={newNegativeMarks} onChange={e => setNewNegativeMarks(e.target.value)} className="bg-black border-zinc-800 rounded-none" />
+              </div>
+              <div className="md:col-span-1">
+                <Button type="submit" className="h-10 rounded-none bg-white text-black hover:bg-zinc-200 font-bold w-full text-xs">CREATE</Button>
+              </div>
             </form>
           </CardContent>
         </Card>
@@ -179,33 +175,20 @@ export default function AdminPage() {
             <CardDescription className="text-zinc-500">Select a test and upload your Excel sheet.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            
             <div className="space-y-2">
               <Label className="text-lg font-bold">Select Target Test</Label>
-              <select 
-                className="w-full flex h-10 border border-zinc-800 bg-black px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white rounded-none"
-                value={selectedTestId}
-                onChange={e => setSelectedTestId(e.target.value)}
-              >
+              <select className="w-full flex h-10 border border-zinc-800 bg-black px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white rounded-none" value={selectedTestId} onChange={e => setSelectedTestId(e.target.value)}>
                 <option value="" disabled>-- Choose a test to upload questions into --</option>
                 {tests.map(test => (
                   <option key={test.id} value={test.id}>{test.title} ({test.duration_minutes} mins)</option>
                 ))}
               </select>
             </div>
-
             <div className={`p-6 border transition-colors rounded-none ${selectedTestId ? "bg-zinc-900 border-zinc-700" : "bg-black border-zinc-900 opacity-50"}`}>
               <Label className="mb-2 block">Upload Excel (.xlsx)</Label>
-              <Input 
-                type="file" 
-                accept=".xlsx, .xls" 
-                onChange={handleExcelUpload} 
-                disabled={isUploadingBulk || !selectedTestId}
-                className="cursor-pointer bg-black border-zinc-800 rounded-none"
-              />
+              <Input type="file" accept=".xlsx, .xls" onChange={handleExcelUpload} disabled={isUploadingBulk || !selectedTestId} className="cursor-pointer bg-black border-zinc-800 rounded-none" />
               {isUploadingBulk && <p className="text-sm text-white mt-3 font-bold animate-pulse">Processing & Uploading...</p>}
             </div>
-
           </CardContent>
         </Card>
 
