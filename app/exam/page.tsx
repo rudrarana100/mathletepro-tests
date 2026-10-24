@@ -120,20 +120,29 @@ function ExamEngineContent() {
   };
 
   // 4. Clean up Local Storage on Submit
-  const handleSubmit = async () => {
+const handleSubmit = async () => {
     if (isSubmitting.current) return;
     isSubmitting.current = true;
     
-    // Save final results payload
-    localStorage.setItem(`results_${testId}`, JSON.stringify(answers));
+    // Get the current user
+    const { data: { user } } = await supabase.auth.getUser();
     
-    // Destroy in-progress cache
+    // Send to our new grading API
+    const res = await fetch("/api/submit-exam", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ testId, userId: user?.id, answers })
+    });
+    
+    const data = await res.json();
+    
+    // Destroy in-progress cache so they can't resume a submitted test
     localStorage.removeItem(`answers_${testId}`);
     localStorage.removeItem(`review_${testId}`);
     localStorage.removeItem(`time_${testId}`);
 
-    alert("Exam Submitted Successfully.");
-    router.push("/dashboard"); 
+    // Route to the new analytics dashboard
+    router.push(`/results?resultId=${data.resultId}`); 
   };
 
   if (isLoading) return <div className="flex h-screen items-center justify-center bg-black text-white font-bold tracking-widest uppercase text-sm animate-pulse">Initializing Engine...</div>;
