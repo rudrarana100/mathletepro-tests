@@ -35,8 +35,8 @@ export function UpdatePasswordForm({
     try {
       const { error } = await supabase.auth.updateUser({ password });
       if (error) throw error;
-      // Update this route to redirect to an authenticated route. The user already has an active session.
-      router.push("/protected");
+      router.push("/dashboard");
+      router.refresh();
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : "An error occurred");
     } finally {
@@ -46,30 +46,39 @@ export function UpdatePasswordForm({
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-2xl">Reset Your Password</CardTitle>
-          <CardDescription>
-            Please enter your new password below.
+      <Card className="rounded-none border-zinc-800 bg-zinc-950 text-white shadow-xl">
+        <CardHeader className="space-y-1">
+          <CardTitle className="text-2xl font-black uppercase tracking-tight">Security Credentials</CardTitle>
+          <CardDescription className="text-zinc-400 text-xs font-mono">
+            Specify a new secure passphrase for your academic account
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleForgotPassword}>
-            <div className="flex flex-col gap-6">
+            <div className="flex flex-col gap-5">
               <div className="grid gap-2">
-                <Label htmlFor="password">New password</Label>
+                <Label htmlFor="password" className="font-mono text-xs uppercase text-zinc-300">New Password</Label>
                 <Input
                   id="password"
                   type="password"
-                  placeholder="New password"
+                  placeholder="Enter new password"
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  className="rounded-none border-zinc-800 bg-black text-white font-mono text-xs focus:border-zinc-600 h-10"
                 />
               </div>
-              {error && <p className="text-sm text-red-500">{error}</p>}
-              <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? "Saving..." : "Save new password"}
+              {error && (
+                <div className="p-3 border border-red-500/40 bg-red-950/20 text-red-400 text-xs font-mono leading-relaxed">
+                  {error}
+                </div>
+              )}
+              <Button
+                type="submit"
+                className="w-full rounded-none bg-white text-black hover:bg-zinc-200 font-mono text-xs font-bold uppercase tracking-wider h-11"
+                disabled={isLoading}
+              >
+                {isLoading ? "Updating Security Hash..." : "Save New Password"}
               </Button>
             </div>
           </form>

@@ -4,12 +4,28 @@ import { createClient } from "@/lib/supabase/server";
 import { LogoutButton } from "./logout-button";
 
 export async function AuthButton() {
-  const supabase = await createClient();
+  const { cookies } = await import("next/headers");
+  const cookieStore = await cookies();
+  const demoCookie = cookieStore.get("mathlete_demo_user")?.value;
+  let user: { email?: string } | null = null;
 
-  // You can also use getUser() which will be slower.
-  const { data } = await supabase.auth.getClaims();
+  if (demoCookie) {
+    try {
+      user = JSON.parse(demoCookie);
+    } catch {
+      user = null;
+    }
+  }
 
-  const user = data?.claims;
+  if (!user) {
+    try {
+      const supabase = await createClient();
+      const { data } = await supabase.auth.getUser();
+      user = data?.user ?? null;
+    } catch {
+      user = null;
+    }
+  }
 
   return user ? (
     <div className="flex items-center gap-4">

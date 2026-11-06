@@ -38,22 +38,45 @@ export async function updateSession(request: NextRequest) {
     },
   );
 
-  // Do not run code between createServerClient and
-  // supabase.auth.getClaims(). A simple mistake could make it very hard to debug
-  // issues with users being randomly logged out.
+  // Check for demo user session cookie
+  const demoCookie = request.cookies.get("mathlete_demo_user")?.value;
+  let user: { id: string; email?: string } | null = null;
 
-  // IMPORTANT: If you remove getClaims() and you use server-side rendering
-  // with the Supabase client, your users may be randomly logged out.
-  const { data } = await supabase.auth.getClaims();
-  const user = data?.claims;
+  if (demoCookie) {
+    try {
+      user = JSON.parse(demoCookie);
+    } catch {
+      user = null;
+    }
+  }
 
-  if (
-    request.nextUrl.pathname !== "/" &&
-    !user &&
-    !request.nextUrl.pathname.startsWith("/login") &&
-    !request.nextUrl.pathname.startsWith("/auth")
-  ) {
-    // no user, potentially respond by redirecting the user to the login page
+  // If not logged in via demo, attempt Supabase session validation with timeout protection
+  if (!user) {
+    try {
+      const authPromise = supabase.auth.getUser();
+      const timeoutPromise = new Promise<{ data: { user: null }; error: Error }>((_, reject) =>
+        setTimeout(() => reject(new Error("Supabase auth timeout")), 1500)
+      );
+      const { data, error } = await Promise.race([authPromise, timeoutPromise]);
+      if (!error && data?.user) {
+        user = data.user;
+      }
+    } catch {
+      // Supabase is offline/unreachable; proceed gracefully
+    }
+  }
+
+  // Exempt public paths, auth pages, and API endpoints from HTML redirect
+  const pathname = request.nextUrl.pathname;
+  const isPublicPath =
+    pathname === "/" ||
+    pathname.startsWith("/login") ||
+    pathname.startsWith("/auth") ||
+    pathname.startsWith("/api") ||
+    pathname.startsWith("/_next") ||
+    pathname.includes(".");
+
+  if (!isPublicPath && !user) {
     const url = request.nextUrl.clone();
     url.pathname = "/auth/login";
     return NextResponse.redirect(url);

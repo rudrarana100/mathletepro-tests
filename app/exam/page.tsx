@@ -1,80 +1,144 @@
 "use client";
 
-import { useEffect, useState, Suspense, useRef } from "react";
+import { useEffect, useState, Suspense, useRef, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
-
-import 'katex/dist/katex.min.css';
-import Latex from 'react-latex-next';
+import { Card } from "@/components/ui/card";
+import "katex/dist/katex.min.css";
+import Latex from "react-latex-next";
+import { AlertTriangle, ShieldAlert, CheckCircle2, Bookmark, HelpCircle, Clock } from "lucide-react";
 
 interface Question {
   id: string;
   statement: string;
   options: string;
-  correct_option_index: number;
+  image_url?: string;
+}
+
+interface TestMeta {
+  id: string;
+  title: string;
+  duration_minutes: number;
+  positive_marks: number;
+  negative_marks: number;
+}
+
+interface StrikeWarning {
+  open: boolean;
+  strikeNumber: number;
+  title: string;
+  message: string;
 }
 
 function ExamEngineContent() {
   const searchParams = useSearchParams();
   const testId = searchParams.get("testId");
   const router = useRouter();
-  const supabase = createClient();
 
+  const [testMeta, setTestMeta] = useState<TestMeta | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
-  
+
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [review, setReview] = useState<Record<string, boolean>>({});
-  
+
   const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
-  
+
+  // Anti-cheat Strike System
+  const [strikes, setStrikes] = useState<number>(0);
+  const [warningModal, setWarningModal] = useState<StrikeWarning | null>(null);
+
+  // Confirm Submit Dialog
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  const [isPaletteOpenMobile, setIsPaletteOpenMobile] = useState(false);
+
   const isSubmitting = useRef(false);
 
-  // 1. Initial Load & Recovery from Local Storage
+  // 1. Initial Load from Server (Answers & Solutions strictly omitted!)
   useEffect(() => {
     if (!testId) {
-      alert("No test selected.");
-      router.push("/dashboard");
+      setErrorMessage("No examination selected. Returning to dashboard...");
+      setTimeout(() => router.push("/dashboard"), 1500);
       return;
     }
 
-    const loadTest = async () => {
-      // Recover Answers and Review status
-      const savedAnswers = localStorage.getItem(`answers_${testId}`);
-      if (savedAnswers) setAnswers(JSON.parse(savedAnswers));
+    const initExam = async () => {
+      try {
+        setIsLoading(true);
 
-      const savedReview = localStorage.getItem(`review_${testId}`);
-      if (savedReview) setReview(JSON.parse(savedReview));
+        const res = await fetch("/api/exam/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ testId }),
+        });
 
-      // Recover Timer or start fresh
-      const { data: testData } = await supabase.from("tests").select("duration_minutes").eq("id", testId).single();
-      if (testData) {
-        const savedTime = localStorage.getItem(`time_${testId}`);
-        if (savedTime) {
-          setTimeLeft(parseInt(savedTime, 10));
-        } else {
-          setTimeLeft(testData.duration_minutes * 60);
+        const data = await res.json();
+
+        if (data.alreadyCompleted) {
+          alert("Notice: You have already completed this examination.");
+          router.push(`/results?resultId=${data.resultId}`);
+          return;
         }
-      }
 
-      // Fetch questions
-      const { data: qData, error } = await supabase
-        .from("questions")
-        .select("*")
-        .eq("test_id", testId);
+        if (data.error || !data.questions) {
+          setErrorMessage(data.error || "Failed to initialize examination");
+          setIsLoading(false);
+          return;
+        }
 
-      if (!error && qData) {
-        setQuestions(qData);
+        setTestMeta(data.test);
+        setQuestions(data.questions);
+
+        // Synchronize strikes
+        const savedStrikes = localStorage.getItem(`strikes_${testId}`);
+        const currentStrikeCount = savedStrikes
+          ? Math.max(parseInt(savedStrikes, 10), data.strikes || 0)
+          : data.strikes || 0;
+        setStrikes(currentStrikeCount);
+
+        // Recover saved answers and review state
+        const savedAnswers = localStorage.getItem(`answers_${testId}`);
+        if (savedAnswers) {
+          try {
+            setAnswers(JSON.parse(savedAnswers));
+          } catch (e) {
+            console.error("Failed to parse cached answers", e);
+          }
+        }
+
+        const savedReview = localStorage.getItem(`review_${testId}`);
+        if (savedReview) {
+          try {
+            setReview(JSON.parse(savedReview));
+          } catch (e) {
+            console.error("Failed to parse cached review tags", e);
+          }
+        }
+
+        // Initialize timer from server remainingSeconds
+        const serverRemaining = data.remainingSeconds;
+        const localSavedTime = localStorage.getItem(`time_${testId}`);
+        if (localSavedTime) {
+          const parsedLocal = parseInt(localSavedTime, 10);
+          setTimeLeft(Math.min(parsedLocal, serverRemaining));
+        } else {
+          setTimeLeft(serverRemaining);
+        }
+
+        setIsLoading(false);
+      } catch (err) {
+        console.error("Initialization error:", err);
+        setErrorMessage("Network error connecting to examination server.");
+        setIsLoading(false);
       }
-      setIsLoading(false);
     };
 
-    loadTest();
-  }, [testId, router, supabase]);
+    initExam();
+  }, [testId, router]);
 
-  // 2. Save Progress on Every Change
+  // 2. Save Progress to localStorage on change
   useEffect(() => {
     if (testId && !isLoading) {
       localStorage.setItem(`answers_${testId}`, JSON.stringify(answers));
@@ -82,13 +146,75 @@ function ExamEngineContent() {
     }
   }, [answers, review, testId, isLoading]);
 
-  // 3. Bulletproof Timer (Saves every second)
+  // 3. Exam Submit Handler
+  const handleSubmit = useCallback(async (reason?: string) => {
+    if (isSubmitting.current) return;
+    isSubmitting.current = true;
+    setIsConfirmOpen(false);
+
+    try {
+      if (reason === "strike_limit_exceeded") {
+        console.warn("Auto-submitting due to anti-cheat violation (Strike 3)");
+      }
+
+      const res = await fetch("/api/submit-exam", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ testId, answers }),
+      });
+
+      const data = await res.json();
+
+      if (data.error || !data.resultId) {
+        alert("Submission Notice: " + (data.error || "Evaluation failed"));
+        if (data.alreadyCompleted && data.resultId) {
+          router.push(`/results?resultId=${data.resultId}`);
+          return;
+        }
+        isSubmitting.current = false;
+        return;
+      }
+
+      // Cache the result in localStorage so the scorecard and history reflect immediately
+      try {
+        const newRecord = {
+          id: data.resultId,
+          test_id: testId,
+          score: data.score,
+          total_attempted: data.totalAttempted,
+          total_correct: data.totalCorrect,
+          created_at: new Date().toISOString(),
+          tests: { title: testMeta?.title || "Examination" },
+          answers: answers,
+          answers_data: answers,
+        };
+        const prev = JSON.parse(localStorage.getItem("mathlete_local_results") || "[]");
+        localStorage.setItem("mathlete_local_results", JSON.stringify([newRecord, ...prev]));
+        localStorage.setItem(`mathlete_result_${data.resultId}`, JSON.stringify(newRecord));
+      } catch {
+        // ignore
+      }
+
+      // Cleanup exam cache
+      localStorage.removeItem(`answers_${testId}`);
+      localStorage.removeItem(`review_${testId}`);
+      localStorage.removeItem(`time_${testId}`);
+      localStorage.removeItem(`strikes_${testId}`);
+
+      router.push(`/results?resultId=${data.resultId}`);
+    } catch {
+      alert("Network Error: Could not connect to the scoring server. Please check your connection.");
+      isSubmitting.current = false;
+    }
+  }, [answers, testId, router]);
+
+  // 4. Timer Countdown
   useEffect(() => {
-    if (timeLeft === null || isSubmitting.current) return;
+    if (timeLeft === null || isSubmitting.current || isLoading) return;
 
     if (timeLeft <= 0) {
-      alert("Time is up! Submitting exam automatically.");
-      handleSubmit();
+      alert("Time is up! Your examination is being submitted automatically.");
+      handleSubmit("time_expired");
       return;
     }
 
@@ -101,156 +227,390 @@ function ExamEngineContent() {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [timeLeft, testId]);
+  }, [timeLeft, testId, handleSubmit, isLoading]);
 
-  const handleSelectOption = (qId: string, optIndex: number) => {
-    setAnswers({ ...answers, [qId]: optIndex });
-  };
+  // 5. Anti-Cheat: visibilitychange ONLY (no blur)
+  useEffect(() => {
+    if (isLoading || isSubmitting.current || !testId) return;
 
-  const handleClearResponse = () => {
-    const currentQId = questions[currentIndex].id;
-    const newAnswers = { ...answers };
-    delete newAnswers[currentQId];
-    setAnswers(newAnswers);
-  };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        setStrikes((prevStrikes) => {
+          const nextStrike = prevStrikes + 1;
+          localStorage.setItem(`strikes_${testId}`, nextStrike.toString());
 
-  const handleMarkReview = () => {
-    const currentQId = questions[currentIndex].id;
-    setReview({ ...review, [currentQId]: !review[currentQId] });
-  };
+          // Persist strike count on the server
+          fetch("/api/exam/strike", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ testId, strikes: nextStrike }),
+          }).catch(console.error);
 
-  // 4. Bulletproof Submit Function with Error Handling
-  const handleSubmit = async () => {
-    if (isSubmitting.current) return;
-    isSubmitting.current = true;
-    
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      const res = await fetch("/api/submit-exam", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ testId, userId: user?.id, answers })
-      });
-      
-      const data = await res.json();
-      
-      // If the API fails, show the exact error and STOP
-      if (data.error || !data.resultId) {
-        alert("API Error: " + (data.error || "Failed to generate result ID"));
-        isSubmitting.current = false; // unlock button so you can try again
-        return; 
+          if (nextStrike === 1) {
+            setWarningModal({
+              open: true,
+              strikeNumber: 1,
+              title: "Security Warning (Strike 1 of 3)",
+              message:
+                "Tab switch or window minimizing was detected. Mathematical examination integrity is strictly enforced. Navigating away 2 more times will trigger automatic submission.",
+            });
+          } else if (nextStrike === 2) {
+            setWarningModal({
+              open: true,
+              strikeNumber: 2,
+              title: "FINAL SECURITY WARNING (Strike 2 of 3)",
+              message:
+                "Repeated window hide / tab switch detected. This is your final warning. Any further navigation outside this examination window will immediately auto-submit your test.",
+            });
+          } else if (nextStrike >= 3) {
+            setWarningModal({
+              open: true,
+              strikeNumber: 3,
+              title: "Examination Terminated (Strike 3 of 3)",
+              message:
+                "Maximum anti-cheat strikes exceeded. Your responses are being locked and automatically submitted to faculty.",
+            });
+            setTimeout(() => {
+              handleSubmit("strike_limit_exceeded");
+            }, 1200);
+          }
+
+          return nextStrike;
+        });
       }
-      
-      localStorage.removeItem(`answers_${testId}`);
-      localStorage.removeItem(`review_${testId}`);
-      localStorage.removeItem(`time_${testId}`);
+    };
 
-      router.push(`/results?resultId=${data.resultId}`); 
-    } catch  {
-      alert("Network Error: Could not reach the scoring server.");
-      isSubmitting.current = false;
-    }
-  };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [isLoading, testId, handleSubmit]);
 
-  if (isLoading) return <div className="flex h-screen items-center justify-center bg-black text-white font-bold tracking-widest uppercase text-sm animate-pulse">Initializing Engine...</div>;
-  if (questions.length === 0) return <div className="flex h-screen items-center justify-center bg-black text-white font-bold">No questions found for this test.</div>;
+  const handleSelectOption = useCallback((qId: string, optIndex: number) => {
+    setAnswers((prev) => ({ ...prev, [qId]: optIndex }));
+  }, []);
+
+  const handleClearResponse = useCallback(() => {
+    if (!questions[currentIndex]) return;
+    const currentQId = questions[currentIndex].id;
+    setAnswers((prev) => {
+      const nextAnswers = { ...prev };
+      delete nextAnswers[currentQId];
+      return nextAnswers;
+    });
+  }, [questions, currentIndex]);
+
+  const handleMarkReview = useCallback(() => {
+    if (!questions[currentIndex]) return;
+    const currentQId = questions[currentIndex].id;
+    setReview((prev) => ({ ...prev, [currentQId]: !prev[currentQId] }));
+  }, [questions, currentIndex]);
+
+  // 6. Keyboard Shortcuts: [1-4] Select, [N] Next, [P] Prev, [M] Review
+  useEffect(() => {
+    if (isLoading || isSubmitting.current || questions.length === 0) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable) return;
+      if (warningModal?.open || isConfirmOpen) return;
+
+      const key = e.key.toLowerCase();
+      const currentQ = questions[currentIndex];
+      if (!currentQ) return;
+
+      if (["1", "2", "3", "4"].includes(key)) {
+        e.preventDefault();
+        const optIdx = parseInt(key, 10) - 1;
+        handleSelectOption(currentQ.id, optIdx);
+      } else if (key === "n") {
+        e.preventDefault();
+        if (currentIndex < questions.length - 1) {
+          setCurrentIndex((prev) => prev + 1);
+        }
+      } else if (key === "p") {
+        e.preventDefault();
+        if (currentIndex > 0) {
+          setCurrentIndex((prev) => prev - 1);
+        }
+      } else if (key === "m") {
+        e.preventDefault();
+        handleMarkReview();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isLoading, currentIndex, questions, warningModal, isConfirmOpen, handleSelectOption, handleMarkReview]);
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col h-screen items-center justify-center bg-black text-white space-y-4">
+        <div className="w-8 h-8 border-2 border-white border-t-transparent animate-spin rounded-none" />
+        <div className="font-mono text-xs uppercase tracking-widest text-zinc-400">
+          Initializing Secure Examination Engine...
+        </div>
+      </div>
+    );
+  }
+
+  if (errorMessage || questions.length === 0) {
+    return (
+      <div className="flex flex-col h-screen items-center justify-center bg-black text-white p-6">
+        <Card className="max-w-md w-full bg-zinc-950 border-zinc-800 rounded-none p-6 space-y-6">
+          <div className="flex items-center gap-3 text-red-500 font-mono text-sm font-bold uppercase tracking-wider">
+            <AlertTriangle className="w-5 h-5 shrink-0" />
+            <span>Examination Alert</span>
+          </div>
+          <p className="text-zinc-400 text-sm font-sans leading-relaxed">
+            {errorMessage || "No active questions were found for this examination."}
+          </p>
+          <Button
+            onClick={() => router.push("/dashboard")}
+            className="w-full rounded-none bg-white text-black hover:bg-zinc-200 font-bold font-mono text-xs uppercase tracking-wider"
+          >
+            Return to Dashboard
+          </Button>
+        </Card>
+      </div>
+    );
+  }
 
   const currentQ = questions[currentIndex];
-  const parsedOptions = JSON.parse(currentQ.options);
+  let parsedOptions: string[] = [];
+  try {
+    parsedOptions = typeof currentQ.options === "string" ? JSON.parse(currentQ.options) : currentQ.options;
+  } catch {
+    parsedOptions = [];
+  }
+
+  const minutesRemaining = timeLeft !== null ? Math.floor(timeLeft / 60) : 0;
+  const isUrgentTimer = timeLeft !== null && timeLeft <= 300; // Under 5 minutes
+
+  // Calculated Status Counts for Confirm-Submit Dialog
+  const answeredCount = Object.keys(answers).length;
+  const reviewedCount = Object.values(review).filter(Boolean).length;
+  const unattemptedCount = Math.max(0, questions.length - answeredCount);
 
   return (
-    <div className="min-h-screen bg-black text-zinc-100 flex flex-col font-sans">
-      <header className="h-16 border-b border-zinc-800 flex items-center justify-between px-6 bg-zinc-950">
-        <div className="font-bold tracking-tight">Mathlete Pro Gym</div>
-        <div className="flex items-center gap-6 text-sm font-medium">
-          <div className="font-mono bg-zinc-900 px-4 py-2 rounded-none border border-zinc-800 text-lg">
-            {timeLeft !== null ? `${Math.floor(timeLeft / 60)}:${String(timeLeft % 60).padStart(2, '0')}` : "00:00"}
+    <div className="min-h-screen bg-black text-zinc-100 flex flex-col font-sans selection:bg-zinc-800 selection:text-white">
+      {/* Sticky Header with Timer */}
+      <header className="h-16 border-b border-zinc-800 flex items-center justify-between px-4 sm:px-6 bg-zinc-950 sticky top-0 z-30">
+        <div className="flex items-center gap-4">
+          <div className="font-bold tracking-tight text-white uppercase text-sm font-mono truncate max-w-[200px] sm:max-w-none">
+            {testMeta?.title || "Mathlete Pro Gym"}
           </div>
-          <Button onClick={handleSubmit} variant="destructive" className="rounded-none font-bold">
+          <div className="hidden lg:flex items-center gap-2 border-l border-zinc-800 pl-4 text-xs font-mono text-zinc-400">
+            <span>+{testMeta?.positive_marks ?? 4} / -{testMeta?.negative_marks ?? 1} Marks</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 sm:gap-6 text-sm font-medium">
+          {/* Anti-cheat Strike Counter */}
+          <div className="flex items-center gap-1.5 sm:gap-2 border border-zinc-800 bg-black px-2.5 sm:px-3 py-1.5 rounded-none font-mono text-xs">
+            <span className="text-zinc-500 font-bold uppercase tracking-wider hidden sm:inline">
+              STRIKES:
+            </span>
+            <span
+              className={`font-bold ${
+                strikes === 0
+                  ? "text-zinc-400"
+                  : strikes === 1
+                  ? "text-yellow-400"
+                  : "text-red-500 animate-pulse"
+              }`}
+            >
+              {strikes} / 3
+            </span>
+          </div>
+
+          {/* Countdown Timer (Turns Red under 5 mins) */}
+          <div
+            className={`font-mono px-3 sm:px-4 py-1.5 rounded-none border text-base font-bold transition-colors ${
+              isUrgentTimer
+                ? "bg-red-950/40 border-red-800 text-red-400 animate-pulse"
+                : "bg-zinc-900 border-zinc-800 text-white"
+            }`}
+          >
+            {timeLeft !== null
+              ? `${String(minutesRemaining).padStart(2, "0")}:${String(timeLeft % 60).padStart(2, "0")}`
+              : "00:00"}
+          </div>
+
+          {/* Submit Exam Button */}
+          <Button
+            onClick={() => setIsConfirmOpen(true)}
+            variant="destructive"
+            className="rounded-none font-bold font-mono text-xs uppercase tracking-wider px-3 sm:px-6 h-9"
+          >
             SUBMIT EXAM
           </Button>
         </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
-        <div className="flex flex-col flex-1 p-8 overflow-y-auto">
-          <div className="max-w-4xl mx-auto w-full flex-1 space-y-8">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4 text-zinc-500 font-bold text-sm tracking-widest uppercase">
-                <span>Question {currentIndex + 1}</span>
-                <span className="w-12 h-[1px] bg-zinc-800"></span>
+      {/* Main Examination Viewport */}
+      <div className="flex flex-1 flex-col md:flex-row overflow-hidden">
+        {/* Question Area */}
+        <div className="flex flex-col flex-1 p-4 sm:p-6 md:p-8 overflow-y-auto">
+          <div className="max-w-4xl mx-auto w-full flex-1 space-y-6">
+            <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
+              <div className="flex items-center gap-2 sm:gap-3 text-zinc-500 font-bold text-xs tracking-widest uppercase font-mono">
+                <span>QUESTION {currentIndex + 1} OF {questions.length}</span>
+                <span className="text-zinc-700 hidden sm:inline">•</span>
+                <span className="text-zinc-400 hidden sm:inline">Single Choice</span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsPaletteOpenMobile(!isPaletteOpenMobile)}
+                  className="md:hidden text-[11px] font-mono font-bold uppercase tracking-wider px-2 py-1 border border-zinc-800 bg-zinc-900 text-zinc-300 hover:text-white"
+                >
+                  {isPaletteOpenMobile ? "Hide Palette" : "Show Palette"}
+                </button>
+
+                {review[currentQ.id] && (
+                  <span className="px-2 py-0.5 text-[11px] font-mono font-bold uppercase tracking-wider bg-yellow-500/10 text-yellow-400 border border-yellow-500/30">
+                    Review
+                  </span>
+                )}
               </div>
             </div>
-            
-            <div className="text-2xl font-medium leading-relaxed">
+
+            {/* Statement */}
+            <div className="text-xl md:text-2xl font-medium leading-relaxed p-4 sm:p-6 bg-zinc-950 border border-zinc-800 rounded-none space-y-4">
               <Latex>{currentQ.statement}</Latex>
+              {currentQ.image_url && (
+                <div className="pt-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={currentQ.image_url}
+                    alt="Question Diagram"
+                    className="max-h-72 max-w-full object-contain border border-zinc-800 bg-black"
+                  />
+                </div>
+              )}
             </div>
 
-            <div className="grid grid-cols-1 gap-3 pt-6">
+            {/* Options */}
+            <div className="grid grid-cols-1 gap-3 pt-2">
               {parsedOptions.map((opt: string, idx: number) => {
                 const isSelected = answers[currentQ.id] === idx;
                 return (
                   <button
                     key={idx}
+                    type="button"
                     onClick={() => handleSelectOption(currentQ.id, idx)}
-                    className={`p-5 text-left border rounded-none transition-all duration-200 ${
-                      isSelected 
-                        ? 'border-white bg-zinc-900 text-white shadow-[0_0_10px_rgba(255,255,255,0.05)]' 
-                        : 'border-zinc-800 bg-black text-zinc-400 hover:border-zinc-500 hover:text-zinc-200'
+                    className={`p-4 md:p-5 text-left border rounded-none transition-all duration-150 flex items-start gap-4 ${
+                      isSelected
+                        ? "border-white bg-zinc-900 text-white shadow-inner"
+                        : "border-zinc-800 bg-black text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
                     }`}
                   >
-                    <span className="font-bold mr-4 opacity-50">{String.fromCharCode(65 + idx)}.</span>
-                    <Latex>{opt}</Latex>
+                    <span
+                      className={`w-6 h-6 flex items-center justify-center font-mono text-xs font-bold shrink-0 border ${
+                        isSelected
+                          ? "border-white bg-white text-black"
+                          : "border-zinc-800 bg-zinc-950 text-zinc-400"
+                      }`}
+                    >
+                      {String.fromCharCode(65 + idx)}
+                    </span>
+                    <div className="text-base text-zinc-100 pt-0.5 leading-relaxed">
+                      <Latex>{opt}</Latex>
+                    </div>
                   </button>
                 );
               })}
             </div>
           </div>
 
-          <div className="max-w-4xl mx-auto w-full pt-8 flex gap-4 mt-auto">
-            <Button 
+          {/* Bottom Action Controls */}
+          <div className="max-w-4xl mx-auto w-full pt-8 flex flex-wrap gap-2.5 sm:gap-3 mt-auto">
+            <Button
+              type="button"
               onClick={handleMarkReview}
-              className={`flex-1 rounded-none font-bold border ${review[currentQ.id] ? 'bg-yellow-600 text-black hover:bg-yellow-500 border-yellow-600' : 'bg-transparent text-white border-zinc-800 hover:bg-zinc-900'}`}
+              className={`flex-1 rounded-none font-bold font-mono text-xs tracking-wider uppercase h-11 border ${
+                review[currentQ.id]
+                  ? "bg-yellow-500/20 text-yellow-400 border-yellow-500/50 hover:bg-yellow-500/30"
+                  : "bg-transparent text-zinc-300 border-zinc-800 hover:bg-zinc-900"
+              }`}
             >
-              {review[currentQ.id] ? 'UNMARK REVIEW' : 'MARK FOR REVIEW'}
+              {review[currentQ.id] ? "UNMARK REVIEW" : "MARK FOR REVIEW"}
             </Button>
-            <Button 
+
+            <Button
+              type="button"
               onClick={handleClearResponse}
-              className="flex-1 rounded-none bg-transparent border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-900 font-bold"
+              className="flex-1 rounded-none bg-transparent border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-900 font-bold font-mono text-xs tracking-wider uppercase h-11"
             >
               CLEAR RESPONSE
             </Button>
-            <Button 
-              disabled={currentIndex === questions.length - 1} 
-              onClick={() => setCurrentIndex(prev => prev + 1)}
-              className="flex-[2] rounded-none bg-white text-black hover:bg-zinc-200 font-bold"
+
+            <Button
+              type="button"
+              disabled={currentIndex === 0}
+              onClick={() => setCurrentIndex((prev) => prev - 1)}
+              variant="outline"
+              className="rounded-none border-zinc-800 bg-black text-zinc-300 hover:bg-zinc-900 font-mono text-xs font-bold uppercase h-11 px-4"
+            >
+              PREVIOUS
+            </Button>
+
+            <Button
+              type="button"
+              disabled={currentIndex === questions.length - 1}
+              onClick={() => setCurrentIndex((prev) => prev + 1)}
+              className="flex-[2] rounded-none bg-white text-black hover:bg-zinc-200 font-bold font-mono text-xs tracking-wider uppercase h-11"
             >
               SAVE & NEXT
             </Button>
           </div>
+
+          {/* Keyboard Shortcuts Hint Bar */}
+          <div className="max-w-4xl mx-auto w-full pt-3 hidden sm:flex items-center justify-between text-[11px] font-mono text-zinc-500">
+            <div className="flex items-center gap-3">
+              <span><kbd className="text-zinc-300 border border-zinc-800 px-1 py-0.5 bg-zinc-950">1-4</kbd> Select Option</span>
+              <span><kbd className="text-zinc-300 border border-zinc-800 px-1 py-0.5 bg-zinc-950">N</kbd> Next</span>
+              <span><kbd className="text-zinc-300 border border-zinc-800 px-1 py-0.5 bg-zinc-950">P</kbd> Prev</span>
+              <span><kbd className="text-zinc-300 border border-zinc-800 px-1 py-0.5 bg-zinc-950">M</kbd> Mark Review</span>
+            </div>
+            <span>Mathlete Pro Gym v2</span>
+          </div>
         </div>
 
-        <div className="w-80 border-l border-zinc-800 bg-zinc-950 p-6 flex flex-col">
-          <div className="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-6">Question Palette</div>
-          
-          <div className="grid grid-cols-5 gap-2 overflow-y-auto pb-4">
+        {/* Sidebar Question Palette */}
+        <aside className={`w-full md:w-80 border-t md:border-t-0 md:border-l border-zinc-800 bg-zinc-950 p-6 flex-col shrink-0 ${isPaletteOpenMobile ? "flex" : "hidden md:flex"}`}>
+          <div className="flex items-center justify-between text-xs font-bold uppercase tracking-widest text-zinc-500 font-mono mb-4">
+            <span>Question Palette</span>
+            <span className="text-white font-mono">{currentIndex + 1} / {questions.length}</span>
+          </div>
+
+          <div className="grid grid-cols-5 gap-2 overflow-y-auto max-h-64 md:max-h-[calc(100vh-280px)] pb-4">
             {questions.map((q, idx) => {
               const isAnswered = answers[q.id] !== undefined;
               const isReviewed = review[q.id];
               const isCurrent = idx === currentIndex;
-              
-              let btnClass = "border-zinc-800 text-zinc-500 bg-black"; 
-              if (isCurrent) btnClass = "border-white text-white bg-zinc-900 ring-1 ring-white";
-              else if (isAnswered && isReviewed) btnClass = "border-yellow-500 bg-yellow-900/30 text-yellow-500";
-              else if (isAnswered) btnClass = "border-green-500 bg-green-900/30 text-green-500";
-              else if (isReviewed) btnClass = "border-yellow-500 border-dashed text-yellow-500";
+
+              // Clear visual state for each palette tile:
+              let tileClass = "border-zinc-800 text-zinc-500 bg-black hover:border-zinc-600";
+              if (isCurrent) {
+                tileClass = "border-white text-white bg-zinc-900 ring-2 ring-white font-black";
+              } else if (isAnswered && isReviewed) {
+                tileClass = "border-yellow-500 bg-yellow-950/40 text-yellow-400 font-bold";
+              } else if (isAnswered) {
+                tileClass = "border-emerald-500 bg-emerald-950/40 text-emerald-400 font-bold";
+              } else if (isReviewed) {
+                tileClass = "border-yellow-500 border-dashed text-yellow-400 bg-black font-medium";
+              }
 
               return (
                 <button
                   key={idx}
+                  type="button"
                   onClick={() => setCurrentIndex(idx)}
-                  className={`h-10 text-sm font-bold border rounded-none transition-colors ${btnClass}`}
+                  className={`h-10 text-xs font-bold font-mono border rounded-none transition-all ${tileClass}`}
+                  title={`Question ${idx + 1}`}
                 >
                   {idx + 1}
                 </button>
@@ -258,22 +618,145 @@ function ExamEngineContent() {
             })}
           </div>
 
-          <div className="mt-auto space-y-3 pt-6 border-t border-zinc-800 text-xs font-medium text-zinc-400">
-            <div className="flex items-center gap-3"><div className="w-4 h-4 border border-green-500 bg-green-900/30"></div> Answered</div>
-            <div className="flex items-center gap-3"><div className="w-4 h-4 border border-yellow-500 border-dashed"></div> Marked for Review</div>
-            <div className="flex items-center gap-3"><div className="w-4 h-4 border border-yellow-500 bg-yellow-900/30"></div> Answered & Marked</div>
-            <div className="flex items-center gap-3"><div className="w-4 h-4 border border-zinc-800 bg-black"></div> Not Visited</div>
+          {/* Palette Legend */}
+          <div className="mt-auto space-y-2 pt-6 border-t border-zinc-900 text-xs font-medium text-zinc-400 font-mono">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-3.5 h-3.5 border border-emerald-500 bg-emerald-950/40" />
+                <span>Answered</span>
+              </div>
+              <span className="font-bold text-white">{answeredCount}</span>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-3.5 h-3.5 border border-yellow-500 border-dashed bg-black" />
+                <span>Marked for Review</span>
+              </div>
+              <span className="font-bold text-yellow-400">{reviewedCount}</span>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-3.5 h-3.5 border border-zinc-800 bg-black" />
+                <span>Unattempted</span>
+              </div>
+              <span className="font-bold text-zinc-500">{unattemptedCount}</span>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      {/* Confirm-Submit Modal Dialog */}
+      {isConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+          <div className="bg-zinc-950 border border-zinc-800 rounded-none max-w-lg w-full p-6 md:p-8 space-y-6 shadow-2xl">
+            <div className="space-y-1 border-b border-zinc-800 pb-4">
+              <h2 className="font-mono text-xl font-bold uppercase tracking-tight text-white">
+                Submit Examination
+              </h2>
+              <p className="text-zinc-500 font-mono text-xs uppercase tracking-wider">
+                Review your completion status before final evaluation
+              </p>
+            </div>
+
+            {/* Counts Breakdown Grid */}
+            <div className="grid grid-cols-3 gap-3 text-center font-mono">
+              <div className="p-3 bg-zinc-900/60 border border-emerald-950/60">
+                <div className="flex items-center justify-center gap-1.5 text-emerald-400 text-[11px] uppercase font-bold mb-1">
+                  <CheckCircle2 className="w-3 h-3" /> Answered
+                </div>
+                <div className="text-2xl font-black text-white">{answeredCount}</div>
+              </div>
+
+              <div className="p-3 bg-zinc-900/60 border border-yellow-950/60">
+                <div className="flex items-center justify-center gap-1.5 text-yellow-400 text-[11px] uppercase font-bold mb-1">
+                  <Bookmark className="w-3 h-3" /> Marked
+                </div>
+                <div className="text-2xl font-black text-white">{reviewedCount}</div>
+              </div>
+
+              <div className="p-3 bg-zinc-900/60 border border-zinc-800">
+                <div className="flex items-center justify-center gap-1.5 text-zinc-500 text-[11px] uppercase font-bold mb-1">
+                  <HelpCircle className="w-3 h-3" /> Skipped
+                </div>
+                <div className="text-2xl font-black text-white">{unattemptedCount}</div>
+              </div>
+            </div>
+
+            <div className="p-3.5 border border-zinc-900 bg-black text-xs font-mono text-zinc-400 flex items-center gap-3">
+              <Clock className="w-4 h-4 text-zinc-500 shrink-0" />
+              <span>
+                Remaining Timer: <strong className="text-white">{timeLeft !== null ? `${minutesRemaining}m ${timeLeft % 60}s` : "00:00"}</strong>
+              </span>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-3 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsConfirmOpen(false)}
+                className="flex-1 rounded-none border-zinc-800 bg-transparent text-zinc-300 hover:bg-zinc-900 font-mono text-xs uppercase tracking-wider h-11"
+              >
+                Keep Attempting
+              </Button>
+              <Button
+                type="button"
+                onClick={() => handleSubmit("student_confirmed")}
+                className="flex-1 rounded-none bg-white text-black hover:bg-zinc-200 font-mono text-xs font-bold uppercase tracking-wider h-11"
+              >
+                Confirm & Submit
+              </Button>
+            </div>
           </div>
         </div>
+      )}
 
-      </div>
+      {/* Anti-cheat Strike Warning Dialog */}
+      {warningModal?.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+          <div className="bg-zinc-950 border-2 border-red-500/80 rounded-none max-w-lg w-full p-6 md:p-8 space-y-6 shadow-2xl">
+            <div className="flex items-center gap-3 text-red-500">
+              <ShieldAlert className="w-8 h-8 shrink-0 animate-pulse" />
+              <h2 className="font-mono text-base md:text-lg font-bold uppercase tracking-tight">
+                {warningModal.title}
+              </h2>
+            </div>
+
+            <p className="text-zinc-300 text-sm leading-relaxed font-sans">
+              {warningModal.message}
+            </p>
+
+            <div className="pt-2">
+              {warningModal.strikeNumber < 3 ? (
+                <Button
+                  onClick={() => setWarningModal(null)}
+                  className="w-full rounded-none bg-red-600 hover:bg-red-500 text-white font-mono text-xs font-bold uppercase tracking-wider h-11"
+                >
+                  I UNDERSTAND — RETURN TO TEST
+                </Button>
+              ) : (
+                <div className="text-center font-mono text-xs text-red-400 uppercase tracking-widest animate-pulse font-bold">
+                  Submitting responses...
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 export default function ExamPage() {
   return (
-    <Suspense fallback={<div className="flex h-screen items-center justify-center bg-black text-white">Loading Engine...</div>}>
+    <Suspense
+      fallback={
+        <div className="flex h-screen items-center justify-center bg-black text-white font-mono text-xs uppercase tracking-widest">
+          Loading Examination Engine...
+        </div>
+      }
+    >
       <ExamEngineContent />
     </Suspense>
   );
