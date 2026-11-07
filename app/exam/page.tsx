@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import "katex/dist/katex.min.css";
 import Latex from "react-latex-next";
-import { AlertTriangle, ShieldAlert, CheckCircle2, Bookmark, HelpCircle, Clock } from "lucide-react";
+import { AlertTriangle, ShieldAlert, CheckCircle2, Bookmark, HelpCircle, Clock, Maximize2 } from "lucide-react";
 
 interface Question {
   id: string;
@@ -46,9 +46,13 @@ function ExamEngineContent() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
 
-  // Anti-cheat Strike System
+  // Anti-cheat Strike System & Fullscreen Enforcement
   const [strikes, setStrikes] = useState<number>(0);
   const [warningModal, setWarningModal] = useState<StrikeWarning | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showFullscreenPrompt, setShowFullscreenPrompt] = useState(false);
+  const [isAutoSubmitting, setIsAutoSubmitting] = useState(false);
+  const [submissionError, setSubmissionError] = useState<string | null>(null);
 
   // Confirm Submit Dialog
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
@@ -59,8 +63,8 @@ function ExamEngineContent() {
   // 1. Initial Load from Server (Answers & Solutions strictly omitted!)
   useEffect(() => {
     if (!testId) {
-      setErrorMessage("No examination selected. Returning to dashboard...");
-      setTimeout(() => router.push("/dashboard"), 1500);
+      setErrorMessage("No examination selected. Returning to available tests...");
+      setTimeout(() => router.push("/student/tests"), 1500);
       return;
     }
 
@@ -117,6 +121,19 @@ function ExamEngineContent() {
           }
         }
 
+        // Recover current question index
+        const savedIndex = localStorage.getItem(`currentIndex_${testId}`);
+        if (savedIndex) {
+          try {
+            const parsedIdx = parseInt(savedIndex, 10);
+            if (!isNaN(parsedIdx) && parsedIdx >= 0 && parsedIdx < data.questions.length) {
+              setCurrentIndex(parsedIdx);
+            }
+          } catch {
+            // ignore
+          }
+        }
+
         // Initialize timer from server remainingSeconds
         const serverRemaining = data.remainingSeconds;
         const localSavedTime = localStorage.getItem(`time_${testId}`);
@@ -125,6 +142,16 @@ function ExamEngineContent() {
           setTimeLeft(Math.min(parsedLocal, serverRemaining));
         } else {
           setTimeLeft(serverRemaining);
+        }
+
+        // Check if browser is currently fullscreen
+        const inFs = Boolean(
+          typeof document !== "undefined" &&
+            (document.fullscreenElement || (document as unknown as { webkitFullscreenElement?: Element }).webkitFullscreenElement)
+        );
+        setIsFullscreen(inFs);
+        if (!inFs) {
+          setShowFullscreenPrompt(true);
         }
 
         setIsLoading(false);
@@ -143,35 +170,98 @@ function ExamEngineContent() {
     if (testId && !isLoading) {
       localStorage.setItem(`answers_${testId}`, JSON.stringify(answers));
       localStorage.setItem(`review_${testId}`, JSON.stringify(review));
+      localStorage.setItem(`currentIndex_${testId}`, currentIndex.toString());
     }
-  }, [answers, review, testId, isLoading]);
+  }, [answers, review, currentIndex, testId, isLoading]);
 
-  // 3. Exam Submit Handler
+  // Fullscreen Request & Safe Exit Handlers
+  const requestFullscreen = useCallback(async () => {
+    try {
+      const elem = document.documentElement as unknown as {
+        requestFullscreen?: () => Promise<void>;
+        webkitRequestFullscreen?: () => Promise<void>;
+        msRequestFullscreen?: () => Promise<void>;
+      };
+      if (elem.requestFullscreen) {
+        await elem.requestFullscreen();
+      } else if (elem.webkitRequestFullscreen) {
+        await elem.webkitRequestFullscreen();
+      } else if (elem.msRequestFullscreen) {
+        await elem.msRequestFullscreen();
+      }
+      setIsFullscreen(true);
+      setShowFullscreenPrompt(false);
+    } catch (err) {
+      console.warn("Fullscreen permission or gesture rejected:", err);
+      setIsFullscreen(true);
+      setShowFullscreenPrompt(false);
+    }
+  }, []);
+
+  const exitFullscreenSafe = useCallback(() => {
+    try {
+      if (
+        typeof document !== "undefined" &&
+        (document.fullscreenElement ||
+          (document as unknown as { webkitFullscreenElement?: Element }).webkitFullscreenElement)
+      ) {
+        if (document.exitFullscreen) {
+          document.exitFullscreen().catch(() => {});
+        } else if ((document as unknown as { webkitExitFullscreen?: () => void }).webkitExitFullscreen) {
+          (document as unknown as { webkitExitFullscreen: () => void }).webkitExitFullscreen();
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // 3. Exam Submit Handler with Exponential Retry & Zero Data Loss Guarantee
   const handleSubmit = useCallback(async (reason?: string) => {
     if (isSubmitting.current) return;
     isSubmitting.current = true;
     setIsConfirmOpen(false);
+    setSubmissionError(null);
+
+    if (reason === "time_expired" || reason === "strike_limit_exceeded") {
+      setIsAutoSubmitting(true);
+    }
+
+    const submitWithRetry = async (attempt = 1, maxAttempts = 3): Promise<any> => {
+      try {
+        const res = await fetch("/api/submit-exam", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ testId, answers }),
+        });
+        const data = await res.json();
+        return data;
+      } catch (err) {
+        if (attempt < maxAttempts) {
+          const delay = Math.pow(2, attempt) * 500; // 1000ms, 2000ms
+          await new Promise((r) => setTimeout(r, delay));
+          return submitWithRetry(attempt + 1, maxAttempts);
+        }
+        throw err;
+      }
+    };
 
     try {
       if (reason === "strike_limit_exceeded") {
         console.warn("Auto-submitting due to anti-cheat violation (Strike 3)");
       }
 
-      const res = await fetch("/api/submit-exam", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ testId, answers }),
-      });
-
-      const data = await res.json();
+      const data = await submitWithRetry();
 
       if (data.error || !data.resultId) {
-        alert("Submission Notice: " + (data.error || "Evaluation failed"));
         if (data.alreadyCompleted && data.resultId) {
+          exitFullscreenSafe();
           router.push(`/results?resultId=${data.resultId}`);
           return;
         }
+        setSubmissionError(data.error || "Evaluation failed on scoring server.");
         isSubmitting.current = false;
+        setIsAutoSubmitting(false);
         return;
       }
 
@@ -195,25 +285,31 @@ function ExamEngineContent() {
         // ignore
       }
 
-      // Cleanup exam cache
+      // Cleanup local exam cache
       localStorage.removeItem(`answers_${testId}`);
       localStorage.removeItem(`review_${testId}`);
       localStorage.removeItem(`time_${testId}`);
       localStorage.removeItem(`strikes_${testId}`);
+      localStorage.removeItem(`currentIndex_${testId}`);
+      localStorage.removeItem(`mathlete_exam_${testId}`);
 
+      exitFullscreenSafe();
       router.push(`/results?resultId=${data.resultId}`);
     } catch {
-      alert("Network Error: Could not connect to the scoring server. Please check your connection.");
+      setSubmissionError(
+        "Network Disruption: Could not connect to the scoring server after multiple attempts. All your selected answers remain safely preserved in local storage."
+      );
       isSubmitting.current = false;
+      setIsAutoSubmitting(false);
     }
-  }, [answers, testId, router]);
+  }, [answers, testId, router, testMeta?.title, exitFullscreenSafe]);
 
-  // 4. Timer Countdown
+  // 4. Timer Countdown (Non-blocking Auto-submit on zero)
   useEffect(() => {
     if (timeLeft === null || isSubmitting.current || isLoading) return;
 
     if (timeLeft <= 0) {
-      alert("Time is up! Your examination is being submitted automatically.");
+      setIsAutoSubmitting(true);
       handleSubmit("time_expired");
       return;
     }
@@ -229,54 +325,83 @@ function ExamEngineContent() {
     return () => clearInterval(timer);
   }, [timeLeft, testId, handleSubmit, isLoading]);
 
-  // 5. Anti-Cheat: visibilitychange ONLY (no blur)
+  // 5. Centralized Anti-Cheat Strike Handler
+  const triggerStrike = useCallback((reasonDesc: string) => {
+    if (isSubmitting.current || isLoading || !testId) return;
+
+    setStrikes((prevStrikes) => {
+      const nextStrike = prevStrikes + 1;
+      localStorage.setItem(`strikes_${testId}`, nextStrike.toString());
+
+      // Persist strike count on the server
+      fetch("/api/exam/strike", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ testId, strikes: nextStrike }),
+      }).catch(console.error);
+
+      if (nextStrike === 1) {
+        setWarningModal({
+          open: true,
+          strikeNumber: 1,
+          title: "Security Warning (Strike 1 of 3)",
+          message: `${reasonDesc} Navigating away 2 more times will trigger automatic submission.`,
+        });
+      } else if (nextStrike === 2) {
+        setWarningModal({
+          open: true,
+          strikeNumber: 2,
+          title: "FINAL SECURITY WARNING (Strike 2 of 3)",
+          message: `${reasonDesc} This is your final warning. Any further navigation outside this examination window will immediately auto-submit your test.`,
+        });
+      } else if (nextStrike >= 3) {
+        setWarningModal({
+          open: true,
+          strikeNumber: 3,
+          title: "Examination Terminated (Strike 3 of 3)",
+          message:
+            "Maximum anti-cheat strikes exceeded. Your responses are being locked and automatically submitted to faculty.",
+        });
+        setIsAutoSubmitting(true);
+        setTimeout(() => {
+          handleSubmit("strike_limit_exceeded");
+        }, 1200);
+      }
+
+      return nextStrike;
+    });
+  }, [isLoading, testId, handleSubmit]);
+
+  // 6. Proctored Fullscreen Monitor
+  useEffect(() => {
+    if (isLoading || isSubmitting.current) return;
+
+    const handleFsChange = () => {
+      const inFs = Boolean(
+        document.fullscreenElement ||
+          (document as unknown as { webkitFullscreenElement?: Element }).webkitFullscreenElement
+      );
+      setIsFullscreen(inFs);
+      if (!inFs && !isSubmitting.current && !showFullscreenPrompt) {
+        triggerStrike("Fullscreen exit detected. You must remain in full-screen proctored mode during the examination.");
+      }
+    };
+
+    document.addEventListener("fullscreenchange", handleFsChange);
+    document.addEventListener("webkitfullscreenchange", handleFsChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFsChange);
+      document.removeEventListener("webkitfullscreenchange", handleFsChange);
+    };
+  }, [isLoading, showFullscreenPrompt, triggerStrike]);
+
+  // 7. Tab switch & window minimize monitor
   useEffect(() => {
     if (isLoading || isSubmitting.current || !testId) return;
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
-        setStrikes((prevStrikes) => {
-          const nextStrike = prevStrikes + 1;
-          localStorage.setItem(`strikes_${testId}`, nextStrike.toString());
-
-          // Persist strike count on the server
-          fetch("/api/exam/strike", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ testId, strikes: nextStrike }),
-          }).catch(console.error);
-
-          if (nextStrike === 1) {
-            setWarningModal({
-              open: true,
-              strikeNumber: 1,
-              title: "Security Warning (Strike 1 of 3)",
-              message:
-                "Tab switch or window minimizing was detected. Mathematical examination integrity is strictly enforced. Navigating away 2 more times will trigger automatic submission.",
-            });
-          } else if (nextStrike === 2) {
-            setWarningModal({
-              open: true,
-              strikeNumber: 2,
-              title: "FINAL SECURITY WARNING (Strike 2 of 3)",
-              message:
-                "Repeated window hide / tab switch detected. This is your final warning. Any further navigation outside this examination window will immediately auto-submit your test.",
-            });
-          } else if (nextStrike >= 3) {
-            setWarningModal({
-              open: true,
-              strikeNumber: 3,
-              title: "Examination Terminated (Strike 3 of 3)",
-              message:
-                "Maximum anti-cheat strikes exceeded. Your responses are being locked and automatically submitted to faculty.",
-            });
-            setTimeout(() => {
-              handleSubmit("strike_limit_exceeded");
-            }, 1200);
-          }
-
-          return nextStrike;
-        });
+        triggerStrike("Tab switch or window minimizing was detected. Mathematical examination integrity is strictly enforced.");
       }
     };
 
@@ -284,7 +409,7 @@ function ExamEngineContent() {
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [isLoading, testId, handleSubmit]);
+  }, [isLoading, testId, triggerStrike]);
 
   const handleSelectOption = useCallback((qId: string, optIndex: number) => {
     setAnswers((prev) => ({ ...prev, [qId]: optIndex }));
@@ -366,10 +491,10 @@ function ExamEngineContent() {
             {errorMessage || "No active questions were found for this examination."}
           </p>
           <Button
-            onClick={() => router.push("/dashboard")}
+            onClick={() => router.push("/student/tests")}
             className="w-full rounded-none bg-white text-black hover:bg-zinc-200 font-bold font-mono text-xs uppercase tracking-wider"
           >
-            Return to Dashboard
+            Return to Available Tests
           </Button>
         </Card>
       </div>
@@ -557,14 +682,23 @@ function ExamEngineContent() {
               PREVIOUS
             </Button>
 
-            <Button
-              type="button"
-              disabled={currentIndex === questions.length - 1}
-              onClick={() => setCurrentIndex((prev) => prev + 1)}
-              className="flex-[2] rounded-none bg-white text-black hover:bg-zinc-200 font-bold font-mono text-xs tracking-wider uppercase h-11"
-            >
-              SAVE & NEXT
-            </Button>
+            {currentIndex === questions.length - 1 ? (
+              <Button
+                type="button"
+                onClick={() => setIsConfirmOpen(true)}
+                className="flex-[2] rounded-none bg-emerald-500 text-black hover:bg-emerald-400 font-bold font-mono text-xs tracking-wider uppercase h-11"
+              >
+                REVIEW & SUBMIT
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                onClick={() => setCurrentIndex((prev) => prev + 1)}
+                className="flex-[2] rounded-none bg-white text-black hover:bg-zinc-200 font-bold font-mono text-xs tracking-wider uppercase h-11"
+              >
+                SAVE & NEXT
+              </Button>
+            )}
           </div>
 
           {/* Keyboard Shortcuts Hint Bar */}
@@ -730,7 +864,10 @@ function ExamEngineContent() {
             <div className="pt-2">
               {warningModal.strikeNumber < 3 ? (
                 <Button
-                  onClick={() => setWarningModal(null)}
+                  onClick={() => {
+                    setWarningModal(null);
+                    requestFullscreen();
+                  }}
                   className="w-full rounded-none bg-red-600 hover:bg-red-500 text-white font-mono text-xs font-bold uppercase tracking-wider h-11"
                 >
                   I UNDERSTAND — RETURN TO TEST
@@ -741,6 +878,76 @@ function ExamEngineContent() {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Proctored Fullscreen Request Modal */}
+      {(showFullscreenPrompt || (!isFullscreen && !isLoading && !errorMessage && !isSubmitting.current)) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in duration-200">
+          <div className="bg-zinc-950 border border-zinc-800 rounded-none max-w-md w-full p-6 md:p-8 space-y-6 shadow-2xl text-center">
+            <div className="inline-flex p-3 bg-zinc-900 border border-zinc-800 text-white mx-auto">
+              <ShieldAlert className="w-8 h-8 text-white" />
+            </div>
+            <div className="space-y-1">
+              <h2 className="font-mono text-lg font-bold uppercase tracking-tight text-white">
+                Fullscreen Required
+              </h2>
+              <p className="text-zinc-500 font-mono text-xs uppercase tracking-wider">
+                Proctored Examination Mode
+              </p>
+            </div>
+            <p className="text-zinc-300 text-xs leading-relaxed font-sans text-left">
+              This examination requires full-screen enforcement. Window defocus, tab navigation, and fullscreen exits are strictly tracked. Exceeding 3 security strikes will automatically submit your attempt.
+            </p>
+            <Button
+              type="button"
+              onClick={requestFullscreen}
+              className="w-full rounded-none bg-white text-black hover:bg-zinc-200 font-mono text-xs font-bold uppercase tracking-wider h-11 flex items-center justify-center gap-2"
+            >
+              <Maximize2 className="w-4 h-4" />
+              <span>ENTER FULLSCREEN & BEGIN</span>
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Auto-Submitting / Zero-Timer Lockout Overlay */}
+      {isAutoSubmitting && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/90 backdrop-blur-md p-6 space-y-4 animate-in fade-in duration-150">
+          <div className="w-10 h-10 border-2 border-white border-t-transparent animate-spin rounded-none" />
+          <h2 className="font-mono text-base font-bold uppercase tracking-wider text-white">
+            Time Expired / Security Lockout
+          </h2>
+          <p className="font-mono text-xs text-zinc-400 uppercase tracking-widest text-center">
+            Finalizing and atomically submitting examination responses to the scoring server...
+          </p>
+        </div>
+      )}
+
+      {/* Submission Network Disruption Retry Modal */}
+      {submissionError && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in duration-150">
+          <div className="bg-zinc-950 border border-red-500/80 rounded-none max-w-md w-full p-6 md:p-8 space-y-5 shadow-2xl">
+            <div className="flex items-center gap-3 text-red-500">
+              <AlertTriangle className="w-6 h-6 shrink-0" />
+              <h3 className="font-mono text-sm font-bold uppercase tracking-tight">
+                Submission Network Disruption
+              </h3>
+            </div>
+            <p className="text-zinc-300 text-xs leading-relaxed font-mono">
+              {submissionError}
+            </p>
+            <div className="p-3 bg-zinc-900 border border-zinc-800 text-[11px] font-mono text-emerald-400">
+              ✓ All selected answers and timestamps remain safely preserved in local cache.
+            </div>
+            <Button
+              type="button"
+              onClick={() => handleSubmit("manual_retry")}
+              className="w-full rounded-none bg-white text-black hover:bg-zinc-200 font-mono text-xs font-bold uppercase tracking-wider h-11"
+            >
+              RETRY SUBMISSION NOW
+            </Button>
           </div>
         </div>
       )}

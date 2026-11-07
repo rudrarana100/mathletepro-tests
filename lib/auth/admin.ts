@@ -10,28 +10,11 @@ export interface AdminVerificationResult {
 }
 
 /**
- * Server-side helper to check if the current user has the 'admin' role.
+ * Server-side helper to check if the current user has the 'admin' role in public.profiles.
+ * Never checks hardcoded emails and never uses demo cookies.
  */
 export async function checkAdminRole(): Promise<AdminVerificationResult> {
   try {
-    const { cookies } = await import("next/headers");
-    const cookieStore = await cookies();
-    const demoCookie = cookieStore.get("mathlete_demo_user")?.value;
-
-    if (demoCookie) {
-      try {
-        const parsed = JSON.parse(demoCookie);
-        if (parsed.role === "admin" || parsed.email === "admin@mathletepro.com") {
-          return {
-            isAdmin: true,
-            user: { id: parsed.id || "demo-admin-id", email: parsed.email },
-          };
-        }
-      } catch {
-        // ignore
-      }
-    }
-
     const supabase = await createClient();
     const {
       data: { user },
@@ -42,13 +25,13 @@ export async function checkAdminRole(): Promise<AdminVerificationResult> {
       return { isAdmin: false, user: null, error: "Not authenticated" };
     }
 
-    const { data: profile } = await supabase
+    const { data: profile, error: profileError } = await supabase
       .from("profiles")
       .select("role")
       .eq("id", user.id)
       .maybeSingle();
 
-    if (profile?.role !== "admin" && user.email !== "admin@mathletepro.com") {
+    if (profileError || profile?.role !== "admin") {
       return {
         isAdmin: false,
         user: { id: user.id, email: user.email },

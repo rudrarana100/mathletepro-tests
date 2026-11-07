@@ -7,14 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import AppSidebar from "@/components/AppSidebar";
 import PageHeader from "@/components/PageHeader";
-import EmptyState from "@/components/EmptyState";
 import { useToast } from "@/components/Toast";
 import * as XLSX from "xlsx";
 import "katex/dist/katex.min.css";
 import Latex from "react-latex-next";
 import {
+  Shield,
   Layers,
   HelpCircle,
   Users,
@@ -31,18 +30,18 @@ import {
   CheckCircle2,
   AlertCircle,
   X,
-  Clock,
   RefreshCw,
   FileSpreadsheet,
-  ArrowRight,
   Sparkles,
   ExternalLink,
-  ChevronDown,
+  ArrowRight,
 } from "lucide-react";
 
 // ================================================================
 // Interfaces
 // ================================================================
+
+export type AdminTab = "overview" | "tests" | "questions" | "bulk" | "students" | "analytics";
 
 interface Test {
   id: string;
@@ -85,6 +84,7 @@ interface StudentProfile {
   id: string;
   email: string;
   role: string;
+  full_name?: string | null;
   created_at?: string;
 }
 
@@ -102,15 +102,24 @@ interface BulkPreviewRow {
   error?: string;
 }
 
-export default function AdminPage() {
+export default function AdminDashboard({
+  initialTab = "overview",
+}: {
+  initialTab?: AdminTab;
+}) {
   const supabase = createClient();
   const router = useRouter();
-  const { success, error: toastError, info } = useToast();
+  const { success, error: toastError } = useToast();
 
   // Navigation & Authentication
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"tests" | "questions" | "bulk" | "students" | "analytics">("tests");
+  const [activeTab, setActiveTab] = useState<AdminTab>(initialTab);
+
+  // Sync activeTab when initialTab changes (route transitions)
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
 
   // Tests State
   const [tests, setTests] = useState<Test[]>([]);
@@ -213,7 +222,7 @@ export default function AdminPage() {
         // 3. Fetch Registered Profiles
         const { data: profileData } = await supabase
           .from("profiles")
-          .select("id, email, role, created_at")
+          .select("id, email, role, full_name, created_at")
           .order("created_at", { ascending: false });
 
         if (profileData && profileData.length > 0) {
@@ -221,19 +230,6 @@ export default function AdminPage() {
         }
       } catch {
         // Database offline
-      }
-
-      // If empty, fallback to rich demo datasets
-      if (loadedTests.length === 0) {
-        const { DEMO_TESTS, DEMO_PAST_RESULTS } = await import("@/lib/demo-data");
-        loadedTests = DEMO_TESTS as unknown as Test[];
-        if (loadedResults.length === 0) {
-          loadedResults = DEMO_PAST_RESULTS as unknown as TestResultRecord[];
-        }
-        setStudents([
-          { id: "demo-student-id", email: "student@mathletepro.com", role: "student", created_at: new Date().toISOString() },
-          { id: "demo-admin-id", email: "admin@mathletepro.com", role: "admin", created_at: new Date().toISOString() },
-        ]);
       }
 
       setTests(loadedTests);
@@ -264,33 +260,16 @@ export default function AdminPage() {
           .eq("test_id", testId)
           .order("created_at", { ascending: true });
 
-        if (!error && data && data.length > 0) {
+        if (!error && data) {
           setQuestions(data as Question[]);
-          setIsQuestionsLoading(false);
-          return;
+        } else {
+          setQuestions([]);
         }
       } catch {
-        // ignore
+        setQuestions([]);
+      } finally {
+        setIsQuestionsLoading(false);
       }
-
-      // Fallback to demo questions for this test
-      const { DEMO_QUESTIONS } = await import("@/lib/demo-data");
-      const demoQList = DEMO_QUESTIONS[testId] || [];
-      const formattedQuestions: Question[] = demoQList.map((q) => ({
-        id: q.id,
-        test_id: q.test_id,
-        statement: q.statement,
-        options: JSON.stringify(q.options),
-        correct_option_index: q.correct_option_index,
-        solution: q.solution,
-        topic: q.topic,
-        difficulty: q.difficulty,
-        image_url: q.image_url || null,
-        created_at: new Date().toISOString(),
-      }));
-
-      setQuestions(formattedQuestions);
-      setIsQuestionsLoading(false);
     },
     [supabase]
   );
@@ -301,12 +280,12 @@ export default function AdminPage() {
     }
   }, [selectedTestId, fetchQuestionsForTest]);
 
-  // Sync hash routing on load
+  // Sync hash routing on load if present
   useEffect(() => {
     const handleHashChange = () => {
       const hash = window.location.hash.replace("#", "");
-      if (["tests", "questions", "bulk", "students", "analytics"].includes(hash)) {
-        setActiveTab(hash as "tests" | "questions" | "bulk" | "students" | "analytics");
+      if (["overview", "tests", "questions", "bulk", "students", "analytics"].includes(hash)) {
+        setActiveTab(hash as AdminTab);
       }
     };
     handleHashChange();
@@ -314,57 +293,11 @@ export default function AdminPage() {
     return () => window.removeEventListener("hashchange", handleHashChange);
   }, []);
 
-  // Check admin role
+  // Initialize admin data
   useEffect(() => {
-    const initializeAdmin = async () => {
-      // Check demo cookie first
-      const getCookie = (name: string) => {
-        const match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
-        return match ? decodeURIComponent(match[2]) : null;
-      };
-      const demoVal = getCookie("mathlete_demo_user");
-      if (demoVal) {
-        try {
-          const parsed = JSON.parse(demoVal);
-          if (parsed.role === "admin" || parsed.email === "admin@mathletepro.com") {
-            setIsAdmin(true);
-            fetchAdminData();
-            return;
-          }
-        } catch {
-          // ignore
-        }
-      }
-
-      try {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        if (!user) {
-          router.push("/auth/login");
-          return;
-        }
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("role")
-          .eq("id", user.id)
-          .maybeSingle();
-
-        if (profile?.role !== "admin" && user.email !== "admin@mathletepro.com") {
-          alert("Notice: Administrative privileges are required for faculty management.");
-          router.push("/dashboard");
-          return;
-        }
-        setIsAdmin(true);
-        fetchAdminData();
-      } catch {
-        // Allow demo admin access if running locally/offline
-        setIsAdmin(true);
-        fetchAdminData();
-      }
-    };
-    initializeAdmin();
-  }, [router, supabase, fetchAdminData]);
+    setIsAdmin(true);
+    fetchAdminData();
+  }, [fetchAdminData]);
 
   // ================================================================
   // Test Actions: Create, Edit, Toggle Publish, Duplicate, Delete
@@ -727,21 +660,49 @@ export default function AdminPage() {
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
         const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet);
 
-        const optionMap: Record<string, number> = { A: 0, B: 1, C: 2, D: 3 };
+        const getCol = (row: Record<string, unknown>, ...keys: string[]): string => {
+          for (const k of keys) {
+            if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== "") {
+              return String(row[k]).trim();
+            }
+          }
+          const rowKeys = Object.keys(row);
+          for (const k of keys) {
+            const cleanedK = k.toLowerCase().replace(/[^a-z0-9]/g, "");
+            const match = rowKeys.find(
+              (rk) => rk.toLowerCase().replace(/[^a-z0-9]/g, "") === cleanedK
+            );
+            if (match && row[match] !== undefined && row[match] !== null) {
+              return String(row[match]).trim();
+            }
+          }
+          return "";
+        };
+
+        const optionMap: Record<string, number> = {
+          A: 0, B: 1, C: 2, D: 3,
+          "1": 0, "2": 1, "3": 2, "4": 3,
+          "0": 0,
+          "OPTION A": 0, "OPTION B": 1, "OPTION C": 2, "OPTION D": 3,
+          "OPTION 1": 0, "OPTION 2": 1, "OPTION 3": 2, "OPTION 4": 3,
+          "OPT A": 0, "OPT B": 1, "OPT C": 2, "OPT D": 3,
+        };
+
         const parsedRows: BulkPreviewRow[] = json.map((row, index) => {
           const rowNum = index + 2;
-          const statement = String(row["Question"] || "").trim();
-          const opt1 = String(row["Option A"] || "").trim();
-          const opt2 = String(row["Option B"] || "").trim();
-          const opt3 = String(row["Option C"] || "").trim();
-          const opt4 = String(row["Option D"] || "").trim();
-          const correctChar = String(row["Correct Answer"] || "").trim().toUpperCase();
-          const solution = row["Solution"] ? String(row["Solution"]).trim() : "";
-          const topic = row["Topic"] ? String(row["Topic"]).trim() : "General";
-          const rawDiff = String(row["Difficulty"] || "").trim().toLowerCase();
+          const statement = getCol(row, "Question", "Statement", "Question Statement", "QuestionText");
+          const opt1 = getCol(row, "Option A", "OptionA", "Option 1", "Opt A", "A");
+          const opt2 = getCol(row, "Option B", "OptionB", "Option 2", "Opt B", "B");
+          const opt3 = getCol(row, "Option C", "OptionC", "Option 3", "Opt C", "C");
+          const opt4 = getCol(row, "Option D", "OptionD", "Option 4", "Opt D", "D");
+          const rawAns = getCol(row, "Correct Answer", "Correct", "Answer", "Correct Option", "Key");
+          const correctChar = rawAns.toUpperCase();
+          const solution = getCol(row, "Solution", "Explanation", "Proof", "Detailed Solution");
+          const topic = getCol(row, "Topic", "Subject", "Category", "Unit") || "General";
+          const rawDiff = getCol(row, "Difficulty", "Level", "Difficulty Level").toLowerCase();
           const difficulty: "easy" | "medium" | "hard" =
             rawDiff === "easy" || rawDiff === "hard" ? rawDiff : "medium";
-          const imageUrl = row["Image URL"] ? String(row["Image URL"]).trim() : "";
+          const imageUrl = getCol(row, "Image URL", "ImageUrl", "Image", "Diagram");
 
           // Validation
           const errors: string[] = [];
@@ -751,15 +712,16 @@ export default function AdminPage() {
           if (!opt3) errors.push(`Row ${rowNum}: Option C is missing`);
           if (!opt4) errors.push(`Row ${rowNum}: Option D is missing`);
           if (optionMap[correctChar] === undefined) {
-            errors.push(`Row ${rowNum}: Correct Answer '${correctChar}' is invalid (must be A, B, C, or D)`);
+            errors.push(`Row ${rowNum}: Correct Answer '${rawAns}' is invalid (must be A, B, C, D or 1, 2, 3, 4)`);
           }
 
           const isValid = errors.length === 0;
+          const canonicalChar = ["A", "B", "C", "D"][optionMap[correctChar] ?? 0] || "A";
           return {
             index: rowNum,
             statement,
             options: [opt1, opt2, opt3, opt4],
-            correctChar,
+            correctChar: canonicalChar,
             correctIndex: optionMap[correctChar] ?? 0,
             solution,
             topic,
@@ -942,6 +904,7 @@ export default function AdminPage() {
       return list.filter(
         (item) =>
           item.profile.email.toLowerCase().includes(term) ||
+          (item.profile.full_name || "").toLowerCase().includes(term) ||
           item.profile.id.toLowerCase().includes(term)
       );
     }
@@ -963,6 +926,19 @@ export default function AdminPage() {
     return tests.find((t) => t.id === selectedTestId);
   }, [tests, selectedTestId]);
 
+  // Computed aggregations for Overview
+  const totalQuestionsInBank = useMemo(() => {
+    return tests.reduce((acc, t) => acc + (t.questions?.length || 0), 0);
+  }, [tests]);
+
+  const publishedCount = useMemo(() => {
+    return tests.filter((t) => t.is_published !== false).length;
+  }, [tests]);
+
+  const draftCount = useMemo(() => {
+    return tests.filter((t) => t.is_published === false).length;
+  }, [tests]);
+
   if (isLoading) {
     return (
       <div className="flex h-screen items-center justify-center font-bold font-mono bg-black text-white">
@@ -975,8 +951,7 @@ export default function AdminPage() {
   if (!isAdmin) return null;
 
   return (
-    <AppSidebar>
-      <div className="max-w-6xl mx-auto space-y-8 pb-16">
+    <div className="max-w-6xl mx-auto space-y-8 pb-16">
         {/* Header */}
         <PageHeader
           title="Faculty Command Center"
@@ -1002,6 +977,7 @@ export default function AdminPage() {
         {/* Top Navigation Tabs */}
         <div className="flex items-center gap-1 border-b border-zinc-800 overflow-x-auto pb-1">
           {[
+            { id: "overview", label: "Overview", icon: Shield },
             { id: "tests", label: "Test Series", icon: Layers },
             { id: "questions", label: "Question Studio", icon: HelpCircle },
             { id: "bulk", label: "Excel Bulk Studio", icon: FileSpreadsheet },
@@ -1031,6 +1007,283 @@ export default function AdminPage() {
         </div>
 
         {/* ============================================================ */}
+        {/* TAB 0: EXECUTIVE FACULTY OVERVIEW */}
+        {/* ============================================================ */}
+        {activeTab === "overview" && (
+          <div id="overview" className="space-y-8">
+            {/* KPI Ribbon */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <Card className="bg-zinc-950 border-zinc-800 rounded-none p-5">
+                <span className="text-[10px] font-mono uppercase text-zinc-500 font-bold tracking-widest block">
+                  Test Series
+                </span>
+                <div className="flex items-baseline justify-between mt-1">
+                  <span className="text-3xl font-black font-mono text-white">
+                    {tests.length}
+                  </span>
+                  <span className="text-[10px] font-mono text-emerald-400 border border-emerald-500/30 px-1.5 py-0.5 bg-emerald-950/20">
+                    {publishedCount} Live
+                  </span>
+                </div>
+                <span className="text-xs text-zinc-500 font-mono mt-2 block">
+                  {draftCount} in draft staging
+                </span>
+              </Card>
+
+              <Card className="bg-zinc-950 border-zinc-800 rounded-none p-5">
+                <span className="text-[10px] font-mono uppercase text-zinc-500 font-bold tracking-widest block">
+                  Questions in Bank
+                </span>
+                <span className="text-3xl font-black font-mono text-white mt-1 block">
+                  {totalQuestionsInBank}
+                </span>
+                <span className="text-xs text-zinc-500 font-mono mt-2 block">
+                  Across {tests.length} examinations
+                </span>
+              </Card>
+
+              <Card className="bg-zinc-950 border-zinc-800 rounded-none p-5">
+                <span className="text-[10px] font-mono uppercase text-zinc-500 font-bold tracking-widest block">
+                  Enrolled Candidates
+                </span>
+                <span className="text-3xl font-black font-mono text-white mt-1 block">
+                  {students.length}
+                </span>
+                <span className="text-xs text-zinc-500 font-mono mt-2 block">
+                  Registered student accounts
+                </span>
+              </Card>
+
+              <Card className="bg-zinc-950 border-zinc-800 rounded-none p-5">
+                <span className="text-[10px] font-mono uppercase text-zinc-500 font-bold tracking-widest block">
+                  Lifetime Submissions
+                </span>
+                <div className="flex items-baseline justify-between mt-1">
+                  <span className="text-3xl font-black font-mono text-emerald-400">
+                    {allResults.length}
+                  </span>
+                  <span className="text-[10px] font-mono text-zinc-400 border border-zinc-800 px-1.5 py-0.5 bg-zinc-900">
+                    {analyticsStats.avg} pts avg
+                  </span>
+                </div>
+                <span className="text-xs text-zinc-500 font-mono mt-2 block">
+                  {analyticsStats.accuracy}% cohort accuracy
+                </span>
+              </Card>
+            </div>
+
+            {/* Quick Actions Bar */}
+            <Card className="bg-zinc-950 border-zinc-800 rounded-none p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <span className="text-xs font-mono uppercase text-zinc-400 font-bold">
+                  Faculty Quick Actions:
+                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    onClick={() => {
+                      setActiveTab("tests");
+                      window.location.hash = "tests";
+                    }}
+                    className="h-8 rounded-none bg-white text-black hover:bg-zinc-200 text-xs font-mono font-bold uppercase tracking-wider"
+                  >
+                    <Plus className="w-3.5 h-3.5 mr-1" />
+                    <span>Create Test</span>
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      setActiveTab("questions");
+                      window.location.hash = "questions";
+                    }}
+                    variant="outline"
+                    className="h-8 rounded-none border-zinc-800 bg-zinc-900 text-zinc-200 hover:bg-white hover:text-black text-xs font-mono font-bold uppercase tracking-wider"
+                  >
+                    <HelpCircle className="w-3.5 h-3.5 mr-1" />
+                    <span>Question Studio</span>
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      setActiveTab("bulk");
+                      window.location.hash = "bulk";
+                    }}
+                    variant="outline"
+                    className="h-8 rounded-none border-zinc-800 bg-zinc-900 text-zinc-200 hover:bg-white hover:text-black text-xs font-mono font-bold uppercase tracking-wider"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 mr-1" />
+                    <span>Bulk Upload</span>
+                  </Button>
+                  <Button
+                    onClick={handleExportCSV}
+                    variant="outline"
+                    className="h-8 rounded-none border-zinc-800 bg-zinc-900 text-zinc-200 hover:bg-white hover:text-black text-xs font-mono font-bold uppercase tracking-wider"
+                  >
+                    <Download className="w-3.5 h-3.5 mr-1" />
+                    <span>Export CSV</span>
+                  </Button>
+                </div>
+              </div>
+            </Card>
+
+            {/* Active Tests & Recent Activity Split */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Active Tests (7 cols) */}
+              <Card className="lg:col-span-7 bg-zinc-950 border-zinc-800 rounded-none shadow-none">
+                <CardHeader className="border-b border-zinc-900 pb-3 flex flex-row items-center justify-between">
+                  <div>
+                    <CardTitle className="text-base font-bold text-white flex items-center gap-2">
+                      <Layers className="w-4 h-4 text-zinc-400" />
+                      <span>Configured Tests ({tests.length})</span>
+                    </CardTitle>
+                    <CardDescription className="text-xs text-zinc-500">
+                      Overview of live examinations and draft assessments.
+                    </CardDescription>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setActiveTab("tests");
+                      window.location.hash = "tests";
+                    }}
+                    className="h-7 text-xs font-mono text-zinc-400 hover:text-white rounded-none"
+                  >
+                    <span>Manage All</span>
+                    <ArrowRight className="w-3.5 h-3.5 ml-1" />
+                  </Button>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs font-mono border-collapse">
+                      <thead>
+                        <tr className="border-b border-zinc-900 text-zinc-500 uppercase tracking-widest bg-zinc-950">
+                          <th className="py-2.5 px-3">Title</th>
+                          <th className="py-2.5 px-3">Inquiries</th>
+                          <th className="py-2.5 px-3">Marking</th>
+                          <th className="py-2.5 px-3">Status</th>
+                          <th className="py-2.5 px-3 text-right">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-900">
+                        {tests.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="py-6 text-center text-zinc-600">
+                              No test series created yet.
+                            </td>
+                          </tr>
+                        ) : (
+                          tests.slice(0, 6).map((test) => {
+                            const isPublished = test.is_published !== false;
+                            const qCount = test.questions?.length ?? 0;
+                            return (
+                              <tr key={test.id} className="hover:bg-zinc-900/40">
+                                <td className="py-2.5 px-3 font-sans font-bold text-white max-w-[200px] truncate">
+                                  {test.title}
+                                </td>
+                                <td className="py-2.5 px-3 text-zinc-300">{qCount} Qs</td>
+                                <td className="py-2.5 px-3 text-zinc-400">
+                                  +{test.positive_marks ?? 4}/-{test.negative_marks ?? 1}
+                                </td>
+                                <td className="py-2.5 px-3">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleTogglePublish(test)}
+                                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 border text-[9px] font-bold uppercase ${
+                                      isPublished
+                                        ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
+                                        : "border-zinc-700 bg-zinc-900 text-zinc-400"
+                                    }`}
+                                  >
+                                    {isPublished ? "PUBLISHED" : "DRAFT"}
+                                  </button>
+                                </td>
+                                <td className="py-2.5 px-3 text-right">
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => {
+                                      setSelectedTestId(test.id);
+                                      setActiveTab("questions");
+                                      window.location.hash = "questions";
+                                    }}
+                                    className="h-6 px-2 text-[11px] text-zinc-300 hover:text-white rounded-none"
+                                  >
+                                    Questions
+                                  </Button>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Recent Submissions Feed (5 cols) */}
+              <Card className="lg:col-span-5 bg-zinc-950 border-zinc-800 rounded-none shadow-none">
+                <CardHeader className="border-b border-zinc-900 pb-3 flex flex-row items-center justify-between">
+                  <div>
+                    <CardTitle className="text-base font-bold text-white flex items-center gap-2">
+                      <TrendingUp className="w-4 h-4 text-zinc-400" />
+                      <span>Recent Submissions</span>
+                    </CardTitle>
+                    <CardDescription className="text-xs text-zinc-500">
+                      Latest completed attempts.
+                    </CardDescription>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setActiveTab("analytics");
+                      window.location.hash = "analytics";
+                    }}
+                    className="h-7 text-xs font-mono text-zinc-400 hover:text-white rounded-none"
+                  >
+                    <span>View All</span>
+                    <ArrowRight className="w-3.5 h-3.5 ml-1" />
+                  </Button>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <div className="divide-y divide-zinc-900">
+                    {allResults.length === 0 ? (
+                      <p className="p-6 text-center text-zinc-600 font-mono text-xs">
+                        No submissions recorded yet.
+                      </p>
+                    ) : (
+                      allResults.slice(0, 5).map((r) => (
+                        <div
+                          key={r.id}
+                          className="p-3 hover:bg-zinc-900/40 flex items-center justify-between gap-3 text-xs font-mono"
+                        >
+                          <div className="space-y-0.5 min-w-0">
+                            <p className="text-white font-sans font-bold text-xs truncate">
+                              {r.tests?.title || "Examination"}
+                            </p>
+                            <p className="text-zinc-500 text-[10px]">
+                              {new Date(r.created_at).toLocaleDateString()} &middot; ID: {r.student_id.slice(0, 8)}...
+                            </p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="text-emerald-400 font-bold">{r.score} pts</p>
+                            <button
+                              onClick={() => router.push(`/results?resultId=${r.id}`)}
+                              className="text-[10px] text-zinc-400 hover:text-white underline uppercase"
+                            >
+                              Inspect
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================ */}
         {/* TAB 1: TEST SERIES MANAGEMENT */}
         {/* ============================================================ */}
         {activeTab === "tests" && (
@@ -1053,7 +1306,7 @@ export default function AdminPage() {
                       <Label className="text-xs uppercase font-mono text-zinc-400">Test Title</Label>
                       <Input
                         required
-                        placeholder="e.g. Real Analysis Mock Examination - JEE Advanced"
+                        placeholder="e.g. Real Analysis Examination - JEE Advanced"
                         value={newTestTitle}
                         onChange={(e) => setNewTestTitle(e.target.value)}
                         className="bg-black border-zinc-800 rounded-none text-white text-sm"
@@ -2055,8 +2308,9 @@ export default function AdminPage() {
                         aggregatedStudents.map((item) => (
                           <tr key={item.profile.id} className="hover:bg-zinc-900/40 transition-colors">
                             <td className="py-3.5 px-4 font-sans font-bold text-white">
-                              <div>{item.profile.email}</div>
-                              <div className="text-[10px] text-zinc-600 font-mono">ID: {item.profile.id}</div>
+                              <div>{item.profile.full_name || item.profile.email.split("@")[0]}</div>
+                              <div className="text-[11px] text-zinc-400 font-normal">{item.profile.email}</div>
+                              <div className="text-[10px] text-zinc-600 font-mono">ID: {item.profile.id.slice(0, 8)}...</div>
                             </td>
 
                             <td className="py-3.5 px-4">
@@ -2523,6 +2777,5 @@ export default function AdminPage() {
           </div>
         )}
       </div>
-    </AppSidebar>
   );
 }

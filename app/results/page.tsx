@@ -4,7 +4,7 @@ import { useEffect, useState, Suspense, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import Link from "next/link";
 import PageHeader from "@/components/PageHeader";
 import EmptyState from "@/components/EmptyState";
@@ -17,10 +17,8 @@ import {
   XCircle,
   HelpCircle,
   Clock,
-  RotateCcw,
   TrendingUp,
   BarChart2,
-  Filter,
 } from "lucide-react";
 
 interface ResultData {
@@ -144,10 +142,11 @@ function ResultsContent() {
   const supabase = createClient();
 
   const [resultData, setResultData] = useState<ResultData | null>(null);
+  const [testTitle, setTestTitle] = useState<string>("");
   const [questions, setQuestions] = useState<Question[]>([]);
   const [markingScheme, setMarkingScheme] = useState({ pos: 4, neg: 1 });
   const [rankInfo, setRankInfo] = useState<RankInfo>({ rank: 1, totalCohort: 1, percentile: 100 });
-  const [timeTaken, setTimeTaken] = useState<string>("Standard Duration");
+  const [timeTaken] = useState<string>("Standard Duration");
   const [isLoading, setIsLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -167,45 +166,27 @@ function ResultsContent() {
 
         let myResult: any = null;
 
-        // 1. Check localStorage first for recently submitted exams
+        // 1. Query Supabase for the official test result
         try {
-          const cached = localStorage.getItem(`mathlete_result_${resultId}`);
-          if (cached) {
-            myResult = JSON.parse(cached);
+          const { data, error } = await supabase
+            .from("test_results")
+            .select("*")
+            .eq("id", resultId)
+            .maybeSingle();
+
+          if (!error && data) {
+            myResult = data;
           }
         } catch {
           // ignore
         }
 
-        // 2. If not in localStorage, check DEMO_PAST_RESULTS
-        if (!myResult) {
-          const { DEMO_PAST_RESULTS } = await import("@/lib/demo-data");
-          const found = DEMO_PAST_RESULTS.find((r) => r.id === resultId);
-          if (found) {
-            myResult = {
-              id: found.id,
-              test_id: found.test_id,
-              score: found.score,
-              total_attempted: found.total_attempted,
-              total_correct: found.total_correct,
-              answers: found.answers,
-              answers_data: found.answers,
-              created_at: found.created_at,
-            };
-          }
-        }
-
-        // 3. If still not found, query Supabase
+        // 2. Check localStorage fallback if recently submitted
         if (!myResult) {
           try {
-            const { data, error } = await supabase
-              .from("test_results")
-              .select("*")
-              .eq("id", resultId)
-              .maybeSingle();
-
-            if (!error && data) {
-              myResult = data;
+            const cached = localStorage.getItem(`mathlete_result_${resultId}`);
+            if (cached) {
+              myResult = JSON.parse(cached);
             }
           } catch {
             // ignore
@@ -213,19 +194,9 @@ function ResultsContent() {
         }
 
         if (!myResult) {
-          // Fallback to first demo past result to avoid empty screen
-          const { DEMO_PAST_RESULTS } = await import("@/lib/demo-data");
-          const first = DEMO_PAST_RESULTS[0];
-          myResult = {
-            id: resultId,
-            test_id: first.test_id,
-            score: first.score,
-            total_attempted: first.total_attempted,
-            total_correct: first.total_correct,
-            answers: first.answers,
-            answers_data: first.answers,
-            created_at: first.created_at,
-          };
+          setErrorMsg("Examination result record not found. Please verify the result ID.");
+          setIsLoading(false);
+          return;
         }
 
         const answersObj = myResult.answers_data || myResult.answers || {};
@@ -235,71 +206,62 @@ function ResultsContent() {
         };
         setResultData(parsedResult);
 
-        // 4. Fetch test marking scheme & duration
+        // 3. Fetch test marking scheme & questions from live Supabase
         let loadedQuestions: Question[] = [];
-        const { DEMO_TESTS, DEMO_QUESTIONS } = await import("@/lib/demo-data");
-        const matchedDemoTest = DEMO_TESTS.find((t) => t.id === myResult.test_id);
+        try {
+          const { data: testData } = await supabase
+            .from("tests")
+            .select("title, positive_marks, negative_marks, duration_minutes")
+            .eq("id", myResult.test_id)
+            .maybeSingle();
 
-        if (matchedDemoTest) {
-          setMarkingScheme({
-            pos: matchedDemoTest.positive_marks,
-            neg: matchedDemoTest.negative_marks,
-          });
-          const qList = DEMO_QUESTIONS[matchedDemoTest.id] || [];
-          loadedQuestions = qList.map((q) => ({
-            id: q.id,
-            statement: q.statement,
-            options: JSON.stringify(q.options),
-            correct_option_index: q.correct_option_index,
-            solution: q.solution,
-            topic: q.topic,
-            image_url: q.image_url || undefined,
-          }));
-        } else {
-          try {
-            const { data: testData } = await supabase
-              .from("tests")
-              .select("positive_marks, negative_marks, duration_minutes")
-              .eq("id", myResult.test_id)
-              .maybeSingle();
-
-            if (testData) {
-              setMarkingScheme({
-                pos: testData.positive_marks ?? 4,
-                neg: testData.negative_marks ?? 1,
-              });
-            }
-
-            const { data: qData } = await supabase
-              .from("questions")
-              .select("id, statement, options, correct_option_index, solution, topic, image_url")
-              .eq("test_id", myResult.test_id);
-
-            if (qData && qData.length > 0) {
-              loadedQuestions = qData as Question[];
-            }
-          } catch {
-            // ignore
+          if (testData) {
+            if (testData.title) setTestTitle(testData.title);
+            setMarkingScheme({
+              pos: testData.positive_marks ?? 4,
+              neg: testData.negative_marks ?? 1,
+            });
           }
+
+          const { data: qData } = await supabase
+            .from("questions")
+            .select("id, statement, options, correct_option_index, solution, topic, image_url")
+            .eq("test_id", myResult.test_id)
+            .order("created_at", { ascending: true });
+
+          if (qData && qData.length > 0) {
+            loadedQuestions = qData as Question[];
+          }
+        } catch {
+          // ignore
         }
 
-        if (loadedQuestions.length === 0) {
-          const fallbackQ = DEMO_QUESTIONS[DEMO_TESTS[0].id] || [];
-          loadedQuestions = fallbackQ.map((q) => ({
-            id: q.id,
-            statement: q.statement,
-            options: JSON.stringify(q.options),
-            correct_option_index: q.correct_option_index,
-            solution: q.solution,
-            topic: q.topic,
-            image_url: q.image_url || undefined,
-          }));
-        }
         setQuestions(loadedQuestions);
 
-        // 5. Calculate Rank & Percentile
-        setRankInfo({ rank: 1, totalCohort: 18, percentile: 96 });
-        setTimeTaken("28m 42s");
+        // 4. Calculate live cohort rank and percentile
+        try {
+          const { data: cohortResults } = await supabase
+            .from("test_results")
+            .select("score")
+            .eq("test_id", myResult.test_id)
+            .order("score", { ascending: false });
+
+          if (cohortResults && cohortResults.length > 0) {
+            const total = cohortResults.length;
+            const rank = cohortResults.filter((r) => r.score > myResult.score).length + 1;
+            const belowCount = cohortResults.filter((r) => r.score < myResult.score).length;
+            const percentile = Math.round((belowCount / total) * 100);
+            setRankInfo({
+              rank,
+              totalCohort: total,
+              percentile: Math.max(1, percentile),
+            });
+          } else {
+            setRankInfo({ rank: 1, totalCohort: 1, percentile: 100 });
+          }
+        } catch {
+          setRankInfo({ rank: 1, totalCohort: 1, percentile: 100 });
+        }
       } catch (err) {
         console.error("Results load error:", err);
         setErrorMsg("Failed to load test evaluation results.");
@@ -374,8 +336,8 @@ function ResultsContent() {
           icon={AlertCircle}
           title="Scorecard Record Not Found"
           description={errorMsg || "The requested examination result record cannot be retrieved or may have been removed."}
-          actionLabel="RETURN TO DASHBOARD"
-          actionHref="/dashboard"
+          actionLabel="RETURN TO AVAILABLE TESTS"
+          actionHref="/student/tests"
         />
       </div>
     );
@@ -394,30 +356,31 @@ function ResultsContent() {
     <div className="min-h-screen bg-black text-zinc-100 p-4 md:p-8 font-sans selection:bg-zinc-800 selection:text-white">
       <div className="max-w-5xl mx-auto space-y-10 mt-2">
         <PageHeader
-          title="Examination Scorecard"
+          title={testTitle ? `${testTitle} — Scorecard` : "Examination Scorecard"}
+          badge={testTitle ? "EVALUATED" : undefined}
           description="Detailed Performance Assessment & Verified Mathematical Solutions"
           breadcrumbs={[
-            { label: "Mathlete Pro", href: "/dashboard" },
-            { label: "Student Portal", href: "/dashboard" },
-            { label: "Scorecard" },
+            { label: "Mathlete Pro", href: "/student/tests" },
+            { label: "Available Tests", href: "/student/tests" },
+            { label: testTitle || "Scorecard" },
           ]}
           action={
             <div className="flex items-center gap-2">
-              <Link href="/dashboard">
+              <Link href="/student/tests">
                 <Button
                   variant="outline"
                   size="sm"
                   className="rounded-none border-zinc-800 bg-zinc-950 text-zinc-300 hover:bg-zinc-900 font-mono text-xs uppercase tracking-wider h-9"
                 >
-                  Dashboard
+                  Available Tests
                 </Button>
               </Link>
-              <Link href="/history">
+              <Link href="/student/results">
                 <Button
                   size="sm"
                   className="rounded-none bg-white text-black hover:bg-zinc-200 font-bold font-mono text-xs uppercase tracking-wider h-9"
                 >
-                  My Trajectory
+                  My Results
                 </Button>
               </Link>
             </div>
@@ -768,16 +731,16 @@ function ResultsContent() {
 
         {/* Bottom Actions */}
         <div className="pt-8 border-t border-zinc-800 flex flex-col sm:flex-row justify-between items-center gap-4">
-          <Link href="/dashboard" className="w-full sm:w-auto">
+          <Link href="/student/tests" className="w-full sm:w-auto">
             <Button
               variant="outline"
               className="w-full sm:w-auto rounded-none border-zinc-800 bg-black text-zinc-300 hover:bg-zinc-900 font-mono text-xs uppercase tracking-wider h-12 px-6"
             >
-              Return to Student Portal
+              Return to Available Tests
             </Button>
           </Link>
 
-          <Link href="/history" className="w-full sm:w-auto">
+          <Link href="/student/results" className="w-full sm:w-auto">
             <Button className="w-full sm:w-auto rounded-none bg-white text-black hover:bg-zinc-200 font-bold font-mono text-xs uppercase tracking-wider h-12 px-8">
               View Performance History
             </Button>

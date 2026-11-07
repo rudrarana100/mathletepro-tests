@@ -51,7 +51,7 @@ export function SignUpForm({
 
       if (data.session) {
         // Auto-confirmed signup
-        router.push("/dashboard");
+        router.push("/student/tests");
       } else {
         // Confirmation email dispatched
         router.push("/auth/sign-up-success");
@@ -60,7 +60,7 @@ export function SignUpForm({
       const msg = error instanceof Error ? error.message : "An error occurred";
       if (msg.includes("Failed to fetch") || msg.includes("fetch failed")) {
         setError(
-          "Cloud database connection timeout. To test-drive Mathlete Pro immediately, please return to the Login page and select 1-Click Sandbox Evaluation."
+          "Cloud database connection timeout. Please verify your internet connection and try again."
         );
       } else {
         setError(msg);

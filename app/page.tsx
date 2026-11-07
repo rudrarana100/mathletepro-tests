@@ -1,43 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import "katex/dist/katex.min.css";
 import Latex from "react-latex-next";
 import {
   ShieldAlert,
   BarChart3,
-  CheckCircle2,
   FileSpreadsheet,
   Layers,
   ArrowRight,
-  Terminal,
-  Zap,
-  Lock,
-  Sparkles,
 } from "lucide-react";
 
 export default function Index() {
-  const router = useRouter();
-
-  const handleQuickDemo = (role: "student" | "admin") => {
-    const userPayload =
-      role === "admin"
-        ? { id: "demo-admin-id", email: "admin@mathletepro.com", role: "admin" }
-        : { id: "demo-student-id", email: "student@mathletepro.com", role: "student" };
-
-    document.cookie = `mathlete_demo_user=${encodeURIComponent(
-      JSON.stringify(userPayload)
-    )}; path=/; max-age=86400; SameSite=Lax`;
-
-    if (role === "admin") {
-      router.push("/admin");
-    } else {
-      router.push("/dashboard");
-    }
-  };
-
   return (
     <div className="min-h-screen bg-black text-white selection:bg-zinc-800 selection:text-white font-sans flex flex-col">
       {/* Top Commercial Navigation Header */}
@@ -73,20 +48,21 @@ export default function Index() {
           </nav>
 
           <div className="flex items-center gap-2.5">
-            <Button
-              onClick={() => handleQuickDemo("student")}
-              variant="outline"
-              size="sm"
-              className="hidden sm:inline-flex rounded-none border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800 font-mono text-xs uppercase tracking-wider h-9"
-            >
-              1-Click Demo
-            </Button>
             <Link href="/auth/login">
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-none border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800 font-mono text-xs uppercase tracking-wider h-9 px-3"
+              >
+                Sign In
+              </Button>
+            </Link>
+            <Link href="/auth/sign-up">
               <Button
                 size="sm"
                 className="rounded-none bg-white text-black hover:bg-zinc-200 font-bold font-mono text-xs uppercase tracking-wider h-9 px-4"
               >
-                Sign In
+                Register
               </Button>
             </Link>
           </div>
@@ -120,7 +96,7 @@ export default function Index() {
 
           {/* Interactive CTAs */}
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
-            <Link href="/dashboard" className="w-full sm:w-auto">
+            <Link href="/student/tests" className="w-full sm:w-auto">
               <Button className="w-full sm:w-auto h-12 px-8 rounded-none bg-white text-black hover:bg-zinc-200 font-bold font-mono text-xs uppercase tracking-widest flex items-center justify-center gap-2 shadow-lg">
                 <span>ENTER STUDENT PORTAL</span>
                 <ArrowRight className="w-4 h-4" />
@@ -135,15 +111,6 @@ export default function Index() {
                 <span>FACULTY COMMAND CENTER</span>
               </Button>
             </Link>
-
-            <Button
-              onClick={() => handleQuickDemo("student")}
-              variant="outline"
-              className="w-full sm:w-auto h-12 px-6 rounded-none border-emerald-600/60 bg-emerald-950/20 text-emerald-300 hover:bg-emerald-900/40 font-mono text-xs uppercase tracking-widest flex items-center justify-center gap-2"
-            >
-              <Zap className="w-4 h-4" />
-              <span>TEST-DRIVE SANDBOX</span>
-            </Button>
           </div>
 
           {/* Trust Metric Strip */}
@@ -280,11 +247,11 @@ export default function Index() {
                 <Layers className="w-5 h-5" />
               </div>
               <h3 className="text-xl font-bold uppercase tracking-tight font-mono">
-                Dual Cloud & Offline Sandbox
+                Enterprise Cloud Architecture
               </h3>
               <p className="text-sm text-zinc-400 leading-relaxed">
-                Engineered for immediate commercial demonstration with built-in Olympiad test banks. 
-                Seamlessly connects to cloud PostgreSQL and Supabase Auth with zero runtime code changes.
+                Powered by PostgreSQL with Row-Level Security, atomic server-side scoring RPCs, 
+                and zero answer leakage to ensure unmatched examination integrity and scale.
               </p>
             </div>
           </div>
@@ -298,21 +265,22 @@ export default function Index() {
             Ready to Deploy for Your Institution?
           </h2>
           <p className="text-zinc-400 text-sm md:text-base font-medium">
-            Launch the examination portal immediately in evaluation mode, or link your institutional database with one click.
+            Launch the high-integrity examination portal, manage test series, author complex mathematical questions, and evaluate candidate performance with ease.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
-            <Link href="/auth/login">
+            <Link href="/student/tests">
               <Button className="h-12 px-8 rounded-none bg-white text-black hover:bg-zinc-200 font-bold font-mono text-xs uppercase tracking-widest">
                 LAUNCH EXAM PORTAL
               </Button>
             </Link>
-            <Button
-              onClick={() => handleQuickDemo("admin")}
-              variant="outline"
-              className="h-12 px-8 rounded-none border-zinc-700 bg-black text-zinc-200 hover:bg-zinc-900 font-mono text-xs uppercase tracking-widest"
-            >
-              EXPLORE FACULTY ADMIN
-            </Button>
+            <Link href="/admin">
+              <Button
+                variant="outline"
+                className="h-12 px-8 rounded-none border-zinc-700 bg-black text-zinc-200 hover:bg-zinc-900 font-mono text-xs uppercase tracking-widest"
+              >
+                FACULTY CONSOLE
+              </Button>
+            </Link>
           </div>
         </div>
       </section>
@@ -337,7 +305,7 @@ export default function Index() {
               SIGN IN
             </Link>
             <span>•</span>
-            <Link href="/dashboard" className="hover:text-white transition-colors">
+            <Link href="/student/tests" className="hover:text-white transition-colors">
               STUDENT PORTAL
             </Link>
             <span>•</span>

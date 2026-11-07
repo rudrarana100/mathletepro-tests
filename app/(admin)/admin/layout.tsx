@@ -1,19 +1,10 @@
 import { Suspense } from "react";
-import { redirect } from "next/navigation";
-import { checkAdminRole } from "@/lib/auth/admin";
+import { requireAdmin } from "@/lib/auth/guards";
+import AdminSidebar from "@/components/AdminSidebar";
 
 async function AdminGuard({ children }: { children: React.ReactNode }) {
-  const { isAdmin, user } = await checkAdminRole();
-
-  if (!user) {
-    redirect("/auth/login");
-  }
-
-  if (!isAdmin) {
-    redirect("/dashboard");
-  }
-
-  return <>{children}</>;
+  await requireAdmin();
+  return <AdminSidebar>{children}</AdminSidebar>;
 }
 
 export default function AdminLayout({

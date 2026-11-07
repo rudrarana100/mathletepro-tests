@@ -5,13 +5,17 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
   Search,
-  LayoutDashboard,
-  FileText,
+  BookOpen,
+  Award,
+  User,
   Shield,
+  Layers,
+  HelpCircle,
+  Users,
+  TrendingUp,
   Key,
   LogOut,
   ChevronRight,
-  BookOpen,
 } from "lucide-react";
 
 interface CommandItem {
@@ -31,30 +35,50 @@ export default function CommandMenu({
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
+  const [role, setRole] = useState<"admin" | "student">("student");
   const [tests, setTests] = useState<Array<{ id: string; title: string }>>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const router = useRouter();
   const supabase = createClient();
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Fetch tests once for search
   useEffect(() => {
-    async function loadTests() {
+    async function loadData() {
       try {
-        const { data, error } = await supabase.from("tests").select("id, title").limit(10);
-        if (!error && data && data.length > 0) {
-          setTests(data);
-          return;
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+
+        if (user) {
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("role")
+            .eq("id", user.id)
+            .maybeSingle();
+
+          if (profile?.role === "admin") {
+            setRole("admin");
+          } else {
+            setRole("student");
+          }
+        }
+
+        const { data: testData } = await supabase
+          .from("tests")
+          .select("id, title")
+          .eq("is_published", true)
+          .limit(10);
+
+        if (testData && testData.length > 0) {
+          setTests(testData);
+        } else {
+          setTests([]);
         }
       } catch {
-        // ignore
+        setTests([]);
       }
-      // Fallback to demo tests
-      import("@/lib/demo-data").then(({ DEMO_TESTS }) => {
-        setTests(DEMO_TESTS.map((t) => ({ id: t.id, title: t.title })));
-      });
     }
-    loadTests();
+    loadData();
   }, [supabase]);
 
   // Focus input when opened
@@ -66,27 +90,37 @@ export default function CommandMenu({
     }
   }, [isOpen]);
 
-  const baseItems: CommandItem[] = [
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch {
+      // ignore
+    }
+    router.push("/auth/login");
+    router.refresh();
+  };
+
+  const studentItems: CommandItem[] = [
     {
-      id: "nav-dashboard",
-      title: "Student Portal (Dashboard)",
+      id: "nav-available-tests",
+      title: "Available Tests",
       category: "Navigation",
-      href: "/dashboard",
-      icon: LayoutDashboard,
+      href: "/student/tests",
+      icon: BookOpen,
     },
     {
-      id: "nav-history",
-      title: "Performance Trajectory & Past Attempts",
+      id: "nav-my-results",
+      title: "My Results & Scorecards",
       category: "Navigation",
-      href: "/history",
-      icon: FileText,
+      href: "/student/results",
+      icon: Award,
     },
     {
-      id: "nav-admin",
-      title: "Faculty Command Center",
+      id: "nav-student-profile",
+      title: "Student Profile",
       category: "Navigation",
-      href: "/admin",
-      icon: Shield,
+      href: "/student/profile",
+      icon: User,
     },
     {
       id: "nav-password",
@@ -99,33 +133,82 @@ export default function CommandMenu({
       id: "action-logout",
       title: "Log Out of Session",
       category: "Actions",
-      action: async () => {
-        document.cookie = "mathlete_demo_user=; path=/; max-age=0";
-        try {
-          await supabase.auth.signOut();
-        } catch {
-          // ignore
-        }
-        router.push("/auth/login");
-        router.refresh();
-      },
+      action: handleLogout,
       icon: LogOut,
     },
   ];
 
-  const testItems: CommandItem[] = tests.map((t) => ({
-    id: `test-${t.id}`,
-    title: `Start Examination: ${t.title}`,
-    category: "Tests",
-    href: `/exam?testId=${t.id}`,
-    icon: BookOpen,
-  }));
+  const adminItems: CommandItem[] = [
+    {
+      id: "nav-admin-overview",
+      title: "Faculty Overview",
+      category: "Navigation",
+      href: "/admin",
+      icon: Shield,
+    },
+    {
+      id: "nav-admin-tests",
+      title: "Test Series Management",
+      category: "Navigation",
+      href: "/admin/tests",
+      icon: Layers,
+    },
+    {
+      id: "nav-admin-questions",
+      title: "Question Bank & LaTeX Studio",
+      category: "Navigation",
+      href: "/admin/questions",
+      icon: HelpCircle,
+    },
+    {
+      id: "nav-admin-students",
+      title: "Enrolled Students Directory",
+      category: "Navigation",
+      href: "/admin/students",
+      icon: Users,
+    },
+    {
+      id: "nav-admin-analytics",
+      title: "Cohort Results & Analytics",
+      category: "Navigation",
+      href: "/admin/analytics",
+      icon: TrendingUp,
+    },
+    {
+      id: "nav-password",
+      title: "Update Password & Security",
+      category: "Navigation",
+      href: "/auth/update-password",
+      icon: Key,
+    },
+    {
+      id: "action-logout",
+      title: "Log Out of Session",
+      category: "Actions",
+      action: handleLogout,
+      icon: LogOut,
+    },
+  ];
+
+  const baseItems = role === "admin" ? adminItems : studentItems;
+
+  const testItems: CommandItem[] =
+    role === "student"
+      ? tests.map((t) => ({
+          id: `test-${t.id}`,
+          title: `Start Examination: ${t.title}`,
+          category: "Tests",
+          href: `/exam?testId=${t.id}`,
+          icon: BookOpen,
+        }))
+      : [];
 
   const allItems = [...baseItems, ...testItems];
 
-  const filtered = allItems.filter((item) =>
-    item.title.toLowerCase().includes(query.toLowerCase()) ||
-    item.category.toLowerCase().includes(query.toLowerCase())
+  const filtered = allItems.filter(
+    (item) =>
+      item.title.toLowerCase().includes(query.toLowerCase()) ||
+      item.category.toLowerCase().includes(query.toLowerCase())
   );
 
   // Keyboard navigation inside modal
