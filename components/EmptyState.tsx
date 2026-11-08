@@ -24,17 +24,17 @@ export default function EmptyState({
 }: EmptyStateProps) {
   return (
     <div
-      className={`border border-zinc-800 bg-zinc-950 p-8 sm:p-12 text-center flex flex-col items-center justify-center space-y-4 rounded-none ${className}`}
+      className={`border border-zinc-800 bg-zinc-950 p-8 sm:p-12 text-center flex flex-col items-center justify-center space-y-4 rounded-lg ${className}`}
     >
-      <div className="w-12 h-12 bg-black border border-zinc-800 flex items-center justify-center text-zinc-400">
-        <Icon className="w-6 h-6" />
+      <div className="w-12 h-12 rounded-lg bg-zinc-900/60 border border-zinc-800 flex items-center justify-center text-zinc-400">
+        <Icon className="w-5 h-5" />
       </div>
 
       <div className="space-y-1.5 max-w-md">
-        <h3 className="text-base font-bold uppercase font-mono tracking-wider text-white">
+        <h3 className="text-base font-semibold text-zinc-100">
           {title}
         </h3>
-        <p className="text-xs text-zinc-400 leading-relaxed font-sans">
+        <p className="text-sm text-zinc-400 leading-relaxed font-normal">
           {description}
         </p>
       </div>
@@ -43,14 +43,14 @@ export default function EmptyState({
         <div className="pt-2">
           {actionHref ? (
             <Link href={actionHref}>
-              <Button className="rounded-none bg-white text-black hover:bg-zinc-200 font-mono text-xs font-bold uppercase tracking-wider h-10 px-5">
+              <Button className="rounded-md bg-zinc-100 text-zinc-900 hover:bg-white font-medium text-sm h-9 px-4 transition-colors">
                 {actionLabel}
               </Button>
             </Link>
           ) : (
             <Button
               onClick={onAction}
-              className="rounded-none bg-white text-black hover:bg-zinc-200 font-mono text-xs font-bold uppercase tracking-wider h-10 px-5"
+              className="rounded-md bg-zinc-100 text-zinc-900 hover:bg-white font-medium text-sm h-9 px-4 transition-colors"
             >
               {actionLabel}
             </Button>

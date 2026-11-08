@@ -103,35 +103,35 @@ export default function CommandMenu({
   const studentItems: CommandItem[] = [
     {
       id: "nav-available-tests",
-      title: "Available Tests",
+      title: "Available tests",
       category: "Navigation",
       href: "/student/tests",
       icon: BookOpen,
     },
     {
       id: "nav-my-results",
-      title: "My Results & Scorecards",
+      title: "My results & scorecards",
       category: "Navigation",
       href: "/student/results",
       icon: Award,
     },
     {
       id: "nav-student-profile",
-      title: "Student Profile",
+      title: "Student profile",
       category: "Navigation",
       href: "/student/profile",
       icon: User,
     },
     {
       id: "nav-password",
-      title: "Update Password & Security",
+      title: "Update password",
       category: "Navigation",
       href: "/auth/update-password",
       icon: Key,
     },
     {
       id: "action-logout",
-      title: "Log Out of Session",
+      title: "Sign out",
       category: "Actions",
       action: handleLogout,
       icon: LogOut,
@@ -141,49 +141,49 @@ export default function CommandMenu({
   const adminItems: CommandItem[] = [
     {
       id: "nav-admin-overview",
-      title: "Faculty Overview",
+      title: "Faculty overview",
       category: "Navigation",
       href: "/admin",
       icon: Shield,
     },
     {
       id: "nav-admin-tests",
-      title: "Test Series Management",
+      title: "Test management",
       category: "Navigation",
       href: "/admin/tests",
       icon: Layers,
     },
     {
       id: "nav-admin-questions",
-      title: "Question Bank & LaTeX Studio",
+      title: "Question bank",
       category: "Navigation",
       href: "/admin/questions",
       icon: HelpCircle,
     },
     {
       id: "nav-admin-students",
-      title: "Enrolled Students Directory",
+      title: "Student directory",
       category: "Navigation",
       href: "/admin/students",
       icon: Users,
     },
     {
       id: "nav-admin-analytics",
-      title: "Cohort Results & Analytics",
+      title: "Analytics & results",
       category: "Navigation",
       href: "/admin/analytics",
       icon: TrendingUp,
     },
     {
       id: "nav-password",
-      title: "Update Password & Security",
+      title: "Update password",
       category: "Navigation",
       href: "/auth/update-password",
       icon: Key,
     },
     {
       id: "action-logout",
-      title: "Log Out of Session",
+      title: "Sign out",
       category: "Actions",
       action: handleLogout,
       icon: LogOut,
@@ -196,8 +196,8 @@ export default function CommandMenu({
     role === "student"
       ? tests.map((t) => ({
           id: `test-${t.id}`,
-          title: `Start Examination: ${t.title}`,
-          category: "Tests",
+          title: `Start examination: ${t.title}`,
+          category: "Tests" as const,
           href: `/exam?testId=${t.id}`,
           icon: BookOpen,
         }))
@@ -243,12 +243,12 @@ export default function CommandMenu({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-xl bg-zinc-950 border border-zinc-800 rounded-none shadow-2xl overflow-hidden font-sans"
+        className="w-full max-w-xl bg-zinc-950 border border-zinc-800 rounded-lg shadow-2xl overflow-hidden font-sans"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
         {/* Search Input Bar */}
-        <div className="flex items-center px-4 py-3.5 border-b border-zinc-800 bg-black">
+        <div className="flex items-center px-4 py-3.5 border-b border-zinc-800 bg-zinc-900/40">
           <Search className="w-4 h-4 text-zinc-500 mr-3 shrink-0" />
           <input
             ref={inputRef}
@@ -259,17 +259,17 @@ export default function CommandMenu({
               setSelectedIndex(0);
             }}
             placeholder="Type a command, test title, or jump to page..."
-            className="w-full bg-transparent text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none font-mono"
+            className="w-full bg-transparent text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none font-normal"
           />
-          <kbd className="hidden sm:inline-block px-1.5 py-0.5 text-[10px] font-mono text-zinc-500 border border-zinc-800 bg-zinc-900 rounded-none uppercase">
+          <kbd className="hidden sm:inline-block px-1.5 py-0.5 text-[10px] text-zinc-400 border border-zinc-800 bg-zinc-900 rounded">
             ESC
           </kbd>
         </div>
 
         {/* Results List */}
-        <div className="max-h-80 overflow-y-auto p-2 space-y-1">
+        <div className="max-h-80 overflow-y-auto p-2 space-y-0.5">
           {filtered.length === 0 ? (
-            <div className="p-8 text-center text-xs font-mono text-zinc-500 uppercase tracking-widest">
+            <div className="p-8 text-center text-xs text-zinc-500 font-normal">
               No matching pages or examinations found.
             </div>
           ) : (
@@ -287,19 +287,19 @@ export default function CommandMenu({
                       router.push(item.href);
                     }
                   }}
-                  className={`w-full flex items-center justify-between px-3 py-2.5 text-left rounded-none transition-colors font-mono text-xs ${
+                  className={`w-full flex items-center justify-between px-3 py-2 text-left rounded-md transition-colors text-sm ${
                     isSelected
-                      ? "bg-white text-black font-bold"
-                      : "text-zinc-300 hover:bg-zinc-900 hover:text-white"
+                      ? "bg-zinc-800 text-zinc-100 font-medium"
+                      : "text-zinc-300 hover:bg-zinc-900/60 hover:text-white font-normal"
                   }`}
                 >
                   <div className="flex items-center gap-3 truncate">
-                    <Icon className="w-4 h-4 shrink-0" />
+                    <Icon className="w-4 h-4 shrink-0 text-zinc-400" />
                     <span className="truncate">{item.title}</span>
                   </div>
-                  <div className="flex items-center gap-2 text-[10px] uppercase opacity-60 shrink-0">
+                  <div className="flex items-center gap-2 text-xs text-zinc-500 shrink-0">
                     <span>{item.category}</span>
-                    <ChevronRight className="w-3 h-3" />
+                    <ChevronRight className="w-3.5 h-3.5" />
                   </div>
                 </button>
               );
@@ -308,7 +308,7 @@ export default function CommandMenu({
         </div>
 
         {/* Footer shortcuts */}
-        <div className="border-t border-zinc-900 px-4 py-2 bg-black/60 flex items-center justify-between text-[11px] font-mono text-zinc-500">
+        <div className="border-t border-zinc-900 px-4 py-2 bg-zinc-950 flex items-center justify-between text-xs text-zinc-500 font-normal">
           <div className="flex items-center gap-3">
             <span>↑↓ Navigate</span>
             <span>↵ Select</span>

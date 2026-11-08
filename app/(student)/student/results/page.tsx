@@ -22,10 +22,11 @@ interface AttemptRecord {
   total_attempted: number;
   total_correct: number;
   created_at: string;
+  rank?: number | null;
   tests?: { title: string; duration_minutes: number };
 }
 
-type SortField = "title" | "score" | "attempted" | "correct" | "accuracy" | "date";
+type SortField = "date" | "title" | "score" | "accuracy" | "rank";
 type SortDirection = "asc" | "desc";
 
 function ScoreTrendChart({ data }: { data: AttemptRecord[] }) {
@@ -37,8 +38,8 @@ function ScoreTrendChart({ data }: { data: AttemptRecord[] }) {
 
   if (chronological.length < 2) {
     return (
-      <div className="p-8 border border-zinc-800 bg-zinc-950 text-center font-mono text-xs text-zinc-500 uppercase tracking-widest rounded-none">
-        Complete at least 2 examinations to render score trajectory trends.
+      <div className="p-8 border border-zinc-800 bg-zinc-950 text-center text-xs text-zinc-500 rounded-lg">
+        Complete at least 2 tests to view your score trajectory.
       </div>
     );
   }
@@ -67,21 +68,21 @@ function ScoreTrendChart({ data }: { data: AttemptRecord[] }) {
     .join(" ");
 
   return (
-    <div className="p-6 border border-zinc-800 bg-zinc-950 rounded-none space-y-4">
+    <div className="p-6 border border-zinc-800 bg-zinc-950 rounded-lg space-y-4">
       <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
-        <div className="flex items-center gap-2 text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">
+        <div className="flex items-center gap-2 text-xs font-semibold text-zinc-300">
           <TrendingUp className="w-4 h-4 text-emerald-400" />
-          <span>Historical Score Trajectory</span>
+          <span>Score trajectory</span>
         </div>
-        <span className="text-[10px] font-mono text-zinc-500 uppercase">
-          {chronological.length} Chronological Evaluations
+        <span className="text-xs text-zinc-500 tabular-nums">
+          {chronological.length} evaluations
         </span>
       </div>
 
       <div className="w-full overflow-x-auto">
         <svg
           viewBox={`0 0 ${width} ${height}`}
-          className="w-full h-44 overflow-visible font-mono text-[10px]"
+          className="w-full h-44 overflow-visible text-[10px]"
         >
           {/* Horizontal Grid lines */}
           <line
@@ -93,7 +94,7 @@ function ScoreTrendChart({ data }: { data: AttemptRecord[] }) {
             strokeDasharray="4 4"
             strokeWidth="1"
           />
-          <text x={paddingX - 10} y={getY(0) + 4} fill="#71717a" textAnchor="end">
+          <text x={paddingX - 10} y={getY(0) + 4} fill="#71717a" textAnchor="end" className="tabular-nums">
             0
           </text>
 
@@ -107,7 +108,7 @@ function ScoreTrendChart({ data }: { data: AttemptRecord[] }) {
                 stroke="#18181b"
                 strokeWidth="1"
               />
-              <text x={paddingX - 10} y={getY(maxScore) + 4} fill="#71717a" textAnchor="end">
+              <text x={paddingX - 10} y={getY(maxScore) + 4} fill="#71717a" textAnchor="end" className="tabular-nums">
                 +{maxScore}
               </text>
             </>
@@ -117,7 +118,7 @@ function ScoreTrendChart({ data }: { data: AttemptRecord[] }) {
           <polyline
             fill="none"
             stroke="#10b981"
-            strokeWidth="2.5"
+            strokeWidth="2"
             strokeLinecap="round"
             strokeLinejoin="round"
             points={pointsString}
@@ -132,15 +133,15 @@ function ScoreTrendChart({ data }: { data: AttemptRecord[] }) {
                 <circle
                   cx={cx}
                   cy={cy}
-                  r="4.5"
-                  className="fill-emerald-400 stroke-black stroke-2 hover:r-6 transition-all"
+                  r="4"
+                  className="fill-emerald-400 stroke-zinc-950 stroke-2 hover:r-5 transition-all"
                 />
                 <text
                   x={cx}
                   y={cy - 10}
                   fill="#ffffff"
                   textAnchor="middle"
-                  className="font-bold text-[9px]"
+                  className="font-medium text-[10px] tabular-nums"
                 >
                   {item.score > 0 ? `+${item.score}` : item.score}
                 </text>
@@ -217,24 +218,21 @@ export default function StudentResultsPage() {
       let valA: number | string = 0;
       let valB: number | string = 0;
 
-      if (sortField === "title") {
+      if (sortField === "date") {
+        valA = new Date(a.created_at).getTime();
+        valB = new Date(b.created_at).getTime();
+      } else if (sortField === "title") {
         valA = a.tests?.title || "";
         valB = b.tests?.title || "";
       } else if (sortField === "score") {
         valA = a.score;
         valB = b.score;
-      } else if (sortField === "attempted") {
-        valA = a.total_attempted;
-        valB = b.total_attempted;
-      } else if (sortField === "correct") {
-        valA = a.total_correct;
-        valB = b.total_correct;
       } else if (sortField === "accuracy") {
         valA = a.total_attempted > 0 ? a.total_correct / a.total_attempted : 0;
         valB = b.total_attempted > 0 ? b.total_correct / b.total_attempted : 0;
-      } else if (sortField === "date") {
-        valA = new Date(a.created_at).getTime();
-        valB = new Date(b.created_at).getTime();
+      } else if (sortField === "rank") {
+        valA = a.rank ?? 999999;
+        valB = b.rank ?? 999999;
       }
 
       if (valA < valB) return sortDirection === "asc" ? -1 : 1;
@@ -250,7 +248,7 @@ export default function StudentResultsPage() {
       <PageHeader
         title="My Results"
         badge="STUDENT PORTAL"
-        description="Complete historical transcript of examinations and score trajectory"
+        description="Historical transcript of test results and performance trajectory"
         breadcrumbs={[
           { label: "Mathlete Pro", href: "/student/tests" },
           { label: "My Results" },
@@ -260,9 +258,9 @@ export default function StudentResultsPage() {
             <Button
               variant="outline"
               size="sm"
-              className="rounded-none border-zinc-800 bg-zinc-950 text-zinc-300 hover:bg-zinc-900 font-mono text-xs uppercase tracking-wider h-9"
+              className="rounded-md border-zinc-800 bg-zinc-950 text-zinc-300 hover:bg-zinc-900 font-medium text-xs h-9"
             >
-              <BookOpen className="w-3.5 h-3.5 mr-2" /> Active Tests
+              <BookOpen className="w-3.5 h-3.5 mr-2" /> Available tests
             </Button>
           </Link>
         }
@@ -272,9 +270,9 @@ export default function StudentResultsPage() {
       {!isLoading && attempts.length === 0 ? (
         <EmptyState
           icon={Award}
-          title="No Examination Records Found"
-          description="You have not participated in any examinations yet. Head over to Available Tests to initiate your first examination."
-          actionLabel="EXPLORE ACTIVE TESTS"
+          title="No examination records"
+          description="You have not participated in any examinations yet. Head over to Available Tests to begin your first test."
+          actionLabel="Available tests"
           actionHref="/student/tests"
         />
       ) : (
@@ -284,11 +282,11 @@ export default function StudentResultsPage() {
           {/* 2. Sortable Table of Past Attempts */}
           <section className="space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <h2 className="text-base font-bold uppercase tracking-tight text-white font-mono">
-                Attempt Records ({sortedAndFiltered.length})
+              <h2 className="text-sm font-semibold text-zinc-200">
+                Attempt records ({sortedAndFiltered.length})
               </h2>
 
-              {/* Quick search input */}
+              {/* Search filter input */}
               <div className="relative w-full sm:w-64">
                 <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
@@ -296,27 +294,36 @@ export default function StudentResultsPage() {
                   placeholder="Filter by test title..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full bg-zinc-950 border border-zinc-800 pl-9 pr-3 py-1.5 text-xs font-mono text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 rounded-none"
+                  className="w-full bg-zinc-950 border border-zinc-800 pl-9 pr-3 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-zinc-700 rounded-md"
                 />
               </div>
             </div>
 
-            <div className="overflow-x-auto border border-zinc-800 bg-zinc-950">
-              <table className="w-full text-left text-sm text-zinc-300 border-collapse font-sans">
+            <div className="overflow-x-auto border border-zinc-800 bg-zinc-950 rounded-lg">
+              <table className="w-full text-left text-sm text-zinc-300 border-collapse">
                 <thead>
-                  <tr className="border-b border-zinc-800 text-zinc-500 text-xs uppercase font-mono tracking-widest bg-zinc-900/60 select-none">
+                  <tr className="border-b border-zinc-800 text-zinc-400 text-xs font-medium bg-zinc-900/40 select-none">
                     <th
-                      onClick={() => handleSort("title")}
-                      className="py-3 px-4 cursor-pointer hover:text-white transition-colors"
+                      onClick={() => handleSort("date")}
+                      className="py-3 px-4 cursor-pointer hover:text-zinc-200 transition-colors"
                     >
                       <div className="flex items-center gap-1.5">
-                        <span>Test Title</span>
+                        <span>Date</span>
+                        <ArrowUpDown className="w-3 h-3 opacity-60" />
+                      </div>
+                    </th>
+                    <th
+                      onClick={() => handleSort("title")}
+                      className="py-3 px-4 cursor-pointer hover:text-zinc-200 transition-colors"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span>Test title</span>
                         <ArrowUpDown className="w-3 h-3 opacity-60" />
                       </div>
                     </th>
                     <th
                       onClick={() => handleSort("score")}
-                      className="py-3 px-4 cursor-pointer hover:text-white transition-colors"
+                      className="py-3 px-4 cursor-pointer hover:text-zinc-200 transition-colors"
                     >
                       <div className="flex items-center gap-1.5">
                         <span>Score</span>
@@ -324,26 +331,8 @@ export default function StudentResultsPage() {
                       </div>
                     </th>
                     <th
-                      onClick={() => handleSort("attempted")}
-                      className="py-3 px-4 cursor-pointer hover:text-white transition-colors"
-                    >
-                      <div className="flex items-center gap-1.5">
-                        <span>Attempted</span>
-                        <ArrowUpDown className="w-3 h-3 opacity-60" />
-                      </div>
-                    </th>
-                    <th
-                      onClick={() => handleSort("correct")}
-                      className="py-3 px-4 cursor-pointer hover:text-white transition-colors"
-                    >
-                      <div className="flex items-center gap-1.5">
-                        <span>Correct</span>
-                        <ArrowUpDown className="w-3 h-3 opacity-60" />
-                      </div>
-                    </th>
-                    <th
                       onClick={() => handleSort("accuracy")}
-                      className="py-3 px-4 cursor-pointer hover:text-white transition-colors"
+                      className="py-3 px-4 cursor-pointer hover:text-zinc-200 transition-colors"
                     >
                       <div className="flex items-center gap-1.5">
                         <span>Accuracy</span>
@@ -351,39 +340,39 @@ export default function StudentResultsPage() {
                       </div>
                     </th>
                     <th
-                      onClick={() => handleSort("date")}
-                      className="py-3 px-4 cursor-pointer hover:text-white transition-colors"
+                      onClick={() => handleSort("rank")}
+                      className="py-3 px-4 cursor-pointer hover:text-zinc-200 transition-colors"
                     >
                       <div className="flex items-center gap-1.5">
-                        <span>Date</span>
+                        <span>Rank</span>
                         <ArrowUpDown className="w-3 h-3 opacity-60" />
                       </div>
                     </th>
-                    <th className="py-3 px-4 text-right">Scorecard</th>
+                    <th className="py-3 px-4 text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {isLoading ? (
                     <tr>
                       <td
-                        colSpan={7}
-                        className="py-12 text-center text-zinc-500 font-mono text-xs uppercase tracking-widest"
+                        colSpan={6}
+                        className="py-12 text-center text-zinc-500 text-xs font-normal"
                       >
-                        Loading trajectory records...
+                        Loading records...
                       </td>
                     </tr>
                   ) : sortedAndFiltered.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-12 text-center space-y-2">
-                        <p className="text-zinc-400 font-mono text-xs">
+                      <td colSpan={6} className="py-12 text-center space-y-2">
+                        <p className="text-zinc-400 text-xs font-normal">
                           {searchTerm
                             ? "No matching attempts found for this search filter."
                             : "No test records found. You haven't taken any examinations yet."}
                         </p>
                         {!searchTerm && (
                           <Link href="/student/tests">
-                            <Button className="mt-2 rounded-none bg-white text-black hover:bg-zinc-200 font-mono text-xs font-bold uppercase tracking-wider">
-                              Explore Active Tests
+                            <Button className="mt-2 rounded-md bg-zinc-100 text-zinc-900 hover:bg-white text-xs font-medium">
+                              Available tests
                             </Button>
                           </Link>
                         )}
@@ -401,36 +390,37 @@ export default function StudentResultsPage() {
                           key={item.id}
                           className="border-b border-zinc-900 hover:bg-zinc-900/40 transition-colors"
                         >
-                          <td className="py-4 px-4 font-bold text-white">
+                          <td className="py-3.5 px-4 text-zinc-400 text-xs tabular-nums">
+                            {new Date(item.created_at).toLocaleDateString()}
+                          </td>
+                          <td className="py-3.5 px-4 font-medium text-zinc-100">
                             {item.tests?.title || "Exam Series"}
                           </td>
                           <td
-                            className={`py-4 px-4 font-mono font-bold ${
+                            className={`py-3.5 px-4 tabular-nums font-semibold ${
                               item.score > 0
                                 ? "text-emerald-400"
                                 : item.score < 0
                                 ? "text-rose-400"
-                                : "text-white"
+                                : "text-zinc-200"
                             }`}
                           >
                             {item.score > 0 ? `+${item.score}` : item.score}
                           </td>
-                          <td className="py-4 px-4 font-mono text-zinc-300">
-                            {item.total_attempted}
-                          </td>
-                          <td className="py-4 px-4 font-mono text-emerald-400 font-semibold">
-                            {item.total_correct}
-                          </td>
-                          <td className="py-4 px-4 font-mono text-zinc-300">
+                          <td className="py-3.5 px-4 tabular-nums text-zinc-300">
                             {acc}%
                           </td>
-                          <td className="py-4 px-4 text-zinc-500 text-xs font-mono">
-                            {new Date(item.created_at).toLocaleDateString()}
+                          <td className="py-3.5 px-4 tabular-nums text-xs text-zinc-400">
+                            {item.rank ? `#${item.rank}` : "—"}
                           </td>
-                          <td className="py-4 px-4 text-right">
+                          <td className="py-3.5 px-4 text-right">
                             <Link href={`/results?resultId=${item.id}`}>
-                              <Button className="h-8 px-4 rounded-none bg-zinc-900 border border-zinc-700 text-xs font-mono font-bold hover:bg-white hover:text-black uppercase tracking-wider">
-                                VIEW RESULT
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 px-3 rounded-md border-zinc-800 bg-zinc-900 text-zinc-200 text-xs font-medium hover:bg-zinc-800 hover:text-white transition-colors"
+                              >
+                                View solutions
                               </Button>
                             </Link>
                           </td>

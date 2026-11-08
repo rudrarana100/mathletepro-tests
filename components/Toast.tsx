@@ -51,12 +51,12 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         {toasts.map((t) => (
           <div
             key={t.id}
-            className={`pointer-events-auto p-4 border rounded-none shadow-2xl flex items-start gap-3 animate-in slide-in-from-bottom-2 duration-150 ${
+            className={`pointer-events-auto p-3.5 border rounded-lg shadow-xl flex items-start gap-3 animate-in slide-in-from-bottom-2 duration-150 ${
               t.type === "success"
-                ? "bg-zinc-950 border-emerald-500/40 text-emerald-300"
+                ? "bg-zinc-950 border-emerald-500/30 text-emerald-300"
                 : t.type === "error"
-                ? "bg-zinc-950 border-red-500/50 text-red-300"
-                : "bg-zinc-950 border-zinc-700 text-zinc-200"
+                ? "bg-zinc-950 border-red-500/30 text-red-300"
+                : "bg-zinc-950 border-zinc-800 text-zinc-200"
             }`}
           >
             {t.type === "success" && (
@@ -69,11 +69,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
               <Info className="w-4 h-4 text-zinc-400 shrink-0 mt-0.5" />
             )}
 
-            <div className="flex-1 text-xs font-mono leading-relaxed">{t.message}</div>
+            <div className="flex-1 text-sm font-normal leading-snug">{t.message}</div>
 
             <button
               onClick={() => removeToast(t.id)}
-              className="text-zinc-500 hover:text-white shrink-0 -mr-1 -mt-1 p-1"
+              className="text-zinc-500 hover:text-white shrink-0 -mr-1 -mt-0.5 p-1"
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -87,7 +87,6 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 export function useToast(): ToastContextValue {
   const context = useContext(ToastContext);
   if (!context) {
-    // Graceful fallback if called outside ToastProvider
     return {
       toast: (msg: string) => console.log("[Toast]", msg),
       success: (msg: string) => console.log("[Success]", msg),

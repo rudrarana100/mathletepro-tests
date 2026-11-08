@@ -17,23 +17,23 @@ export default function GlobalErrorPage({
   }, [error]);
 
   return (
-    <div className="min-h-screen bg-black text-white flex items-center justify-center p-6 selection:bg-zinc-800 selection:text-white">
-      <div className="max-w-lg w-full border border-red-900/50 bg-zinc-950 p-8 space-y-6 rounded-none shadow-2xl">
-        <div className="flex items-center gap-3 text-red-500 font-mono text-xs uppercase tracking-widest font-bold">
+    <div className="min-h-screen bg-black text-zinc-100 flex items-center justify-center p-6 selection:bg-zinc-800 selection:text-white font-sans">
+      <div className="max-w-lg w-full border border-red-500/20 bg-zinc-950 p-8 space-y-6 rounded-lg shadow-2xl">
+        <div className="flex items-center gap-3 text-red-400 text-sm font-medium">
           <AlertTriangle className="w-5 h-5 shrink-0" />
-          <span>System Exception // Diagnostic Intercept</span>
+          <span>System error</span>
         </div>
 
         <div className="space-y-2">
-          <h1 className="text-2xl font-black tracking-tight text-white uppercase font-sans">
-            Examination Engine Error
+          <h1 className="text-xl font-semibold tracking-tight text-zinc-100">
+            Something went wrong
           </h1>
-          <p className="text-xs text-zinc-400 font-mono leading-relaxed bg-black p-3 border border-zinc-900">
-            {error.message || "An unexpected state occurred while processing your examination request."}
+          <p className="text-sm text-zinc-400 font-normal leading-relaxed bg-zinc-900/40 p-3 rounded-md border border-zinc-800">
+            {error.message || "An unexpected state occurred while processing your request."}
           </p>
           {error.digest && (
-            <p className="text-[10px] text-zinc-600 font-mono">
-              Diagnostic Digest: {error.digest}
+            <p className="text-xs text-zinc-500 font-normal">
+              Reference code: {error.digest}
             </p>
           )}
         </div>
@@ -41,19 +41,19 @@ export default function GlobalErrorPage({
         <div className="flex flex-col sm:flex-row items-center gap-3 pt-2 border-t border-zinc-900">
           <Button
             onClick={() => reset()}
-            className="w-full sm:w-auto h-10 px-5 rounded-none bg-white text-black hover:bg-zinc-200 font-bold font-mono text-xs uppercase tracking-wider flex items-center justify-center gap-2"
+            className="w-full sm:w-auto h-9 px-4 rounded-md bg-zinc-100 text-zinc-900 hover:bg-white font-medium text-sm transition-colors flex items-center justify-center gap-2"
           >
             <RefreshCw className="w-3.5 h-3.5" />
-            <span>RETRY INQUIRY</span>
+            <span>Try again</span>
           </Button>
 
-          <Link href="/dashboard" className="w-full sm:w-auto">
+          <Link href="/" className="w-full sm:w-auto">
             <Button
               variant="outline"
-              className="w-full sm:w-auto h-10 px-5 rounded-none border-zinc-800 bg-zinc-900 text-zinc-300 hover:bg-zinc-800 font-mono text-xs uppercase tracking-wider flex items-center justify-center gap-2"
+              className="w-full sm:w-auto h-9 px-4 rounded-md border-zinc-800 bg-zinc-900 text-zinc-300 hover:bg-zinc-800 font-medium text-sm transition-colors flex items-center justify-center gap-2"
             >
               <LayoutDashboard className="w-3.5 h-3.5" />
-              <span>RETURN TO DASHBOARD</span>
+              <span>Return home</span>
             </Button>
           </Link>
         </div>

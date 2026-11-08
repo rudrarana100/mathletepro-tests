@@ -14,7 +14,9 @@ export async function updateSession(request: NextRequest) {
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)!,
+
     {
       cookies: {
         getAll() {
@@ -48,18 +50,13 @@ export async function updateSession(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
 
-  // Handle route compatibility redirects
-  if (pathname === "/dashboard") {
-    const url = request.nextUrl.clone();
-    url.pathname = "/student/tests";
-    return NextResponse.redirect(url);
-  }
-
+  // Handle legacy route compatibility redirects
   if (pathname === "/history") {
     const url = request.nextUrl.clone();
     url.pathname = "/student/results";
     return NextResponse.redirect(url);
   }
+
 
   // Exempt public paths, auth pages, and static assets from auth redirect
   const isPublicPath =

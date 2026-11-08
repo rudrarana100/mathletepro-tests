@@ -1,109 +1,161 @@
-<a href="https://demo-nextjs-with-supabase.vercel.app/">
-  <img alt="Next.js and Supabase Starter Kit - the fastest way to build apps with Next.js and Supabase" src="https://demo-nextjs-with-supabase.vercel.app/opengraph-image.png">
-  <h1 align="center">Next.js and Supabase Starter Kit</h1>
-</a>
+# Mathlete Pro Gym — Advanced Mathematics Examination Platform
 
-<p align="center">
- The fastest way to build apps with Next.js and Supabase
-</p>
+Mathlete Pro Gym is a high-reliability, production-grade Computer-Based Testing (CBT) platform engineered specifically for advanced mathematics examinations. It features distraction-free proctoring, synchronized timers, single-engine KaTeX LaTeX rendering, and server-side atomic evaluation.
 
-<p align="center">
-  <a href="#features"><strong>Features</strong></a> ·
-  <a href="#demo"><strong>Demo</strong></a> ·
-  <a href="#deploy-to-vercel"><strong>Deploy to Vercel</strong></a> ·
-  <a href="#clone-and-run-locally"><strong>Clone and run locally</strong></a> ·
-  <a href="#feedback-and-issues"><strong>Feedback and issues</strong></a>
-  <a href="#more-supabase-examples"><strong>More Examples</strong></a>
-</p>
-<br/>
+---
 
-## Features
+## 1. What the Platform Is
 
-- Works across the entire [Next.js](https://nextjs.org) stack
-  - App Router
-  - Pages Router
-  - Proxy
-  - Client
-  - Server
-  - It just works!
-- supabase-ssr. A package to configure Supabase Auth to use cookies
-- Password-based authentication block installed via the [Supabase UI Library](https://supabase.com/ui/docs/nextjs/password-based-auth)
-- Styling with [Tailwind CSS](https://tailwindcss.com)
-- Components with [shadcn/ui](https://ui.shadcn.com/)
-- Optional deployment with [Supabase Vercel Integration and Vercel deploy](#deploy-your-own)
-  - Environment variables automatically assigned to Vercel project
+Mathlete Pro Gym provides a distraction-free, reliable environment for administering competitive and olympiad mathematics tests.
 
-## Demo
+The platform is strictly bounded into two distinct user personas:
+- **Teacher (Faculty / Admin)**:
+  - Test creation studio with duration, total marks, positive/negative marking (+4/-1, etc.), and proctoring strike tolerances.
+  - Question authoring studio with live KaTeX preview (supporting both inline math `$x^2$` and display math `$$\int f(x) dx$$`).
+  - Excel bulk question uploader (`.xlsx`, `.xls`) with automated schema validation.
+  - Test publishing toggle (draft vs. published).
+  - Student directory, individual student performance scorecards, and cohort test analytics with per-question miss rates.
+- **Student**:
+  - Live discovery dashboard of published examinations.
+  - Proctored exam interface with persistent local answer caching, question navigation palette (answered, marked for review, unvisited), fullscreen detection, and multi-tab strike enforcement.
+  - Immediate scorecard generation upon submission with question-by-question breakdown and step-by-step mathematical solutions.
+  - Historical exam records and performance tracking.
 
-You can view a fully working demo at [demo-nextjs-with-supabase.vercel.app](https://demo-nextjs-with-supabase.vercel.app/).
+---
 
-## Deploy to Vercel
+## 2. Prerequisites
 
-Vercel deployment will guide you through creating a Supabase account and project.
+- **Node.js**: `v20.x` or later (LTS recommended)
+- **Package Manager**: `npm` (comes with Node.js)
+- **Supabase Account**: A free or paid Supabase project with PostgreSQL, Auth, and Row Level Security (RLS) enabled.
 
-After installation of the Supabase integration, all relevant environment variables will be assigned to the project so the deployment is fully functioning.
+---
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Fnext.js%2Ftree%2Fcanary%2Fexamples%2Fwith-supabase&project-name=nextjs-with-supabase&repository-name=nextjs-with-supabase&demo-title=nextjs-with-supabase&demo-description=This+starter+configures+Supabase+Auth+to+use+cookies%2C+making+the+user%27s+session+available+throughout+the+entire+Next.js+app+-+Client+Components%2C+Server+Components%2C+Route+Handlers%2C+Server+Actions+and+Middleware.&demo-url=https%3A%2F%2Fdemo-nextjs-with-supabase.vercel.app%2F&external-id=https%3A%2F%2Fgithub.com%2Fvercel%2Fnext.js%2Ftree%2Fcanary%2Fexamples%2Fwith-supabase&demo-image=https%3A%2F%2Fdemo-nextjs-with-supabase.vercel.app%2Fopengraph-image.png)
+## 3. Environment Variables
 
-The above will also clone the Starter kit to your GitHub, you can clone that locally and develop locally.
+Copy `.env.example` to `.env.local`:
 
-If you wish to just develop locally and not deploy to Vercel, [follow the steps below](#clone-and-run-locally).
+```bash
+cp .env.example .env.local
+```
 
-## Clone and run locally
+Populate the values from your Supabase Dashboard (**Project Settings &rarr; API**):
 
-1. You'll first need a Supabase project which can be made [via the Supabase dashboard](https://database.new)
+| Variable | Description |
+| :--- | :--- |
+| `NEXT_PUBLIC_SUPABASE_URL` | Your Supabase Project URL (e.g. `https://xyz.supabase.co`) |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Public client anon key for browser authentication |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Standard publishable key (same as anon key) |
+| `SUPABASE_SERVICE_ROLE_KEY` *(Optional)* | Backend service role secret (never exposed to client) |
 
-2. Create a Next.js app using the Supabase Starter template npx command
+---
 
-   ```bash
-   npx create-next-app --example with-supabase with-supabase-app
-   ```
+## 4. Step-by-Step Setup
 
-   ```bash
-   yarn create next-app --example with-supabase with-supabase-app
-   ```
+### Step 4.1: Clone & Install Dependencies
+```bash
+git clone <repository-url>
+cd mathletepro-tests
+npm install
+```
 
-   ```bash
-   pnpm create next-app --example with-supabase with-supabase-app
-   ```
+### Step 4.2: Apply Supabase Migrations
+Open the **SQL Editor** in your Supabase Dashboard and execute the consolidated production migration:
 
-3. Use `cd` to change into the app's directory
+1. Open `supabase/complete_schema.sql`.
+2. Copy the entire file content and paste it into the Supabase SQL Editor.
+3. Click **Run**.
 
-   ```bash
-   cd with-supabase-app
-   ```
+This script is fully idempotent and safely configures:
+- All required tables: `profiles`, `tests`, `questions`, `test_attempts`, `student_answers`.
+- Row Level Security (RLS) policies with recursive-safe `is_admin()` checks.
+- Sanitized `student_questions` view (hides correct answers and solutions from student queries).
+- Atomic grading and exam initiation RPC functions (`start_exam_session`, `submit_and_grade_exam`).
+- Triggers for user registration and role tampering prevention.
 
-4. Rename `.env.example` to `.env.local` and update the following:
+### Step 4.3: Start Local Development Server
+```bash
+npm run dev
+```
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-  ```env
-  NEXT_PUBLIC_SUPABASE_URL=[INSERT SUPABASE PROJECT URL]
-  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=[INSERT SUPABASE PROJECT API PUBLISHABLE OR ANON KEY]
-  ```
-  > [!NOTE]
-  > This example uses `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, which refers to Supabase's new **publishable** key format.
-  > Both legacy **anon** keys and new **publishable** keys can be used with this variable name during the transition period. Supabase's dashboard may show `NEXT_PUBLIC_SUPABASE_ANON_KEY`; its value can be used in this example.
-  > See the [full announcement](https://github.com/orgs/supabase/discussions/29260) for more information.
+---
 
-  Both `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` can be found in [your Supabase project's API settings](https://supabase.com/dashboard/project/_?showConnect=true)
+## 5. Role Assignment Guide (Teacher / Admin Promotion)
 
-5. You can now run the Next.js local development server:
+By default, every account created through the platform registration page is automatically assigned the `student` role. Self-promotion or role manipulation from the client is blocked at the database level.
 
-   ```bash
-   npm run dev
-   ```
+To designate a faculty member or administrator:
 
-   The starter kit should now be running on [localhost:3000](http://localhost:3000/).
+1. Have the teacher sign up via the `/auth/sign-up` screen using their email address.
+2. In your Supabase Dashboard, go to **SQL Editor** and execute:
 
-6. This template comes with the default shadcn/ui style initialized. If you instead want other ui.shadcn styles, delete `components.json` and [re-install shadcn/ui](https://ui.shadcn.com/docs/installation/next)
+```sql
+UPDATE public.profiles
+SET role = 'admin'
+WHERE email = 'teacher@school.edu';
+```
 
-> Check out [the docs for Local Development](https://supabase.com/docs/guides/getting-started/local-development) to also run Supabase locally.
+3. When the teacher signs in or refreshes, the platform automatically routes them to `/admin`.
 
-## Feedback and issues
+---
 
-Please file feedback and issues over on the [Supabase GitHub org](https://github.com/supabase/supabase/issues/new/choose).
+## 6. Architecture & Security Model
 
-## More Supabase examples
+### Route Groups & Server Guards
+- `(admin)/admin/*`: Faculty modules protected by `requireAdmin()` in `lib/auth/guards.ts`.
+- `(student)/student/*`: Student modules protected by `requireUser()` in `lib/auth/guards.ts`.
+- `/dashboard`: Role router redirecting admins to `/admin` and students to `/student/tests`.
+- `/`: Smart landing page: authenticated users are routed to their respective dashboards; unauthenticated users see the minimal, dark-mode sign-in gateway.
 
-- [Next.js Subscription Payments Starter](https://github.com/vercel/nextjs-subscription-payments)
-- [Cookie-based Auth and the Next.js 13 App Router (free course)](https://youtube.com/playlist?list=PL5S4mPUpp4OtMhpnp93EFSo42iQ40XjbF)
-- [Supabase Auth and the Next.js App Router](https://github.com/supabase/supabase/tree/master/examples/auth/nextjs)
+### Single Math Rendering Engine
+All mathematical equations are rendered via `components/MathRenderer.tsx` using `katex` directly. Unused third-party wrappers (`react-latex-next`, `react-katex`) are completely purged to maintain a lean bundle and zero rendering discrepancies.
+
+### Proctoring & Atomic Evaluation
+- Strike tracking: Visibility changes and blur events trigger warning alerts and increment strikes via `/api/exam/strike`. Exceeding maximum strikes forces immediate submission.
+- Atomic grading: Submissions are graded securely on the server via PostgreSQL RPC (`submit_and_grade_exam`), ensuring correct answers are never revealed prematurely or modified on the client.
+
+---
+
+## 7. Design System & Typography Rules
+
+The interface strictly adheres to clean, dark-mode, distraction-free principles:
+- **Typeface**: `Inter` loaded via `next/font/google` (`display: swap`).
+- **Allowed Weights Only**:
+  - `400` (normal): Body text, descriptions, table cells.
+  - `500` (medium): Buttons, tabs, inputs, nav links, table headers, labels.
+  - `600` (semibold): Page titles, modal titles, card headers, key score figures.
+  - Never use bold (`font-bold` / 700), extra-bold (800), or black (900).
+- **Transform**: Sentence case throughout. No all-caps (`uppercase`) or `tracking-widest` on buttons, nav, headings, or cards.
+- **Monospace Usage**: Monospace (`font-mono` / `tabular-nums`) is strictly reserved for the examination countdown timer and tabular numeric figures.
+
+---
+
+## 8. Verification & Quality Gates
+
+Run the verification suite locally:
+
+```bash
+# 1. Type safety check
+npx tsc --noEmit
+
+# 2. Code linting
+npm run lint
+
+# 3. Production build
+npm run build
+```
+
+---
+
+## 9. Production Deployment Guide (Vercel + Supabase)
+
+### Deploying to Vercel
+1. Push your repository to GitHub, GitLab, or Bitbucket.
+2. Go to [Vercel](https://vercel.com) and import the repository.
+3. In **Settings &rarr; Environment Variables**, add:
+   - `NEXT_PUBLIC_SUPABASE_URL`: `https://<your-project>.supabase.co`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`: `<your-anon-key>`
+   - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`: `<your-anon-key>`
+   - `SUPABASE_SERVICE_ROLE_KEY` *(Optional)*: `<your-service-role-key>`
+4. Click **Deploy**. Vercel will compile Next.js with Turbopack and deploy to the global edge network.

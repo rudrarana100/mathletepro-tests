@@ -8,8 +8,7 @@ import { Card } from "@/components/ui/card";
 import Link from "next/link";
 import PageHeader from "@/components/PageHeader";
 import EmptyState from "@/components/EmptyState";
-import "katex/dist/katex.min.css";
-import Latex from "react-latex-next";
+import { MathRenderer } from "@/components/MathRenderer";
 import {
   Award,
   AlertCircle,
@@ -35,7 +34,7 @@ interface ResultData {
 interface Question {
   id: string;
   statement: string;
-  options: string;
+  options: string | string[];
   correct_option_index: number;
   solution: string | null;
   topic?: string;
@@ -60,8 +59,8 @@ function DonutChart({
   score: number;
 }) {
   const total = Math.max(1, correct + wrong + unattempted);
-  const size = 160;
-  const strokeWidth = 18;
+  const size = 150;
+  const strokeWidth = 16;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
 
@@ -74,7 +73,7 @@ function DonutChart({
   const unattemptedOffset = -(correctStroke + wrongStroke);
 
   return (
-    <div className="relative flex items-center justify-center w-40 h-40 shrink-0">
+    <div className="relative flex items-center justify-center w-36 h-36 shrink-0">
       <svg width={size} height={size} className="rotate-[-90deg]">
         <circle
           cx={size / 2}
@@ -123,13 +122,13 @@ function DonutChart({
       </svg>
       <div className="absolute flex flex-col items-center justify-center text-center">
         <span
-          className={`text-2xl font-black font-mono tracking-tight ${
-            score > 0 ? "text-emerald-400" : score < 0 ? "text-rose-400" : "text-white"
+          className={`text-2xl font-semibold font-mono tabular-nums tracking-tight ${
+            score > 0 ? "text-emerald-400" : score < 0 ? "text-rose-400" : "text-zinc-100"
           }`}
         >
           {score > 0 ? `+${score}` : score}
         </span>
-        <span className="text-[10px] font-mono text-zinc-500 uppercase">Score</span>
+        <span className="text-xs text-zinc-400 font-normal">Score</span>
       </div>
     </div>
   );
@@ -150,12 +149,11 @@ function ResultsContent() {
   const [isLoading, setIsLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
 
-  // Question Filter: "all" | "correct" | "wrong" | "unattempted"
   const [filter, setFilter] = useState<"all" | "correct" | "wrong" | "unattempted">("all");
 
   useEffect(() => {
     if (!resultId || resultId === "undefined") {
-      setErrorMsg("Submission failed. No result ID was returned from the server.");
+      setErrorMsg("No examination result identifier was provided.");
       setIsLoading(false);
       return;
     }
@@ -164,50 +162,26 @@ function ResultsContent() {
       try {
         setIsLoading(true);
 
-        let myResult: any = null;
+        const { data: myResult, error: resultError } = await supabase
+          .from("test_results")
+          .select("*")
+          .eq("id", resultId)
+          .maybeSingle();
 
-        // 1. Query Supabase for the official test result
-        try {
-          const { data, error } = await supabase
-            .from("test_results")
-            .select("*")
-            .eq("id", resultId)
-            .maybeSingle();
-
-          if (!error && data) {
-            myResult = data;
-          }
-        } catch {
-          // ignore
-        }
-
-        // 2. Check localStorage fallback if recently submitted
-        if (!myResult) {
-          try {
-            const cached = localStorage.getItem(`mathlete_result_${resultId}`);
-            if (cached) {
-              myResult = JSON.parse(cached);
-            }
-          } catch {
-            // ignore
-          }
-        }
-
-        if (!myResult) {
-          setErrorMsg("Examination result record not found. Please verify the result ID.");
+        if (resultError || !myResult) {
+          setErrorMsg("Examination scorecard not found or access is restricted.");
           setIsLoading(false);
           return;
         }
 
-        const answersObj = myResult.answers_data || myResult.answers || {};
+        const answersObj = myResult.answers || myResult.answers_data || {};
         const parsedResult: ResultData = {
           ...myResult,
           answers_data: answersObj,
         };
         setResultData(parsedResult);
 
-        // 3. Fetch test marking scheme & questions from live Supabase
-        let loadedQuestions: Question[] = [];
+        // Fetch test details & questions
         try {
           const { data: testData } = await supabase
             .from("tests")
@@ -230,15 +204,13 @@ function ResultsContent() {
             .order("created_at", { ascending: true });
 
           if (qData && qData.length > 0) {
-            loadedQuestions = qData as Question[];
+            setQuestions(qData as Question[]);
           }
         } catch {
           // ignore
         }
 
-        setQuestions(loadedQuestions);
-
-        // 4. Calculate live cohort rank and percentile
+        // Calculate live cohort rank
         try {
           const { data: cohortResults } = await supabase
             .from("test_results")
@@ -256,15 +228,13 @@ function ResultsContent() {
               totalCohort: total,
               percentile: Math.max(1, percentile),
             });
-          } else {
-            setRankInfo({ rank: 1, totalCohort: 1, percentile: 100 });
           }
         } catch {
-          setRankInfo({ rank: 1, totalCohort: 1, percentile: 100 });
+          // ignore
         }
       } catch (err) {
         console.error("Results load error:", err);
-        setErrorMsg("Failed to load test evaluation results.");
+        setErrorMsg("Failed to load test evaluation scorecard.");
       } finally {
         setIsLoading(false);
       }
@@ -273,7 +243,7 @@ function ResultsContent() {
     fetchResults();
   }, [resultId, router, supabase]);
 
-  // Topic-wise accuracy breakdown
+  // Topic accuracy statistics
   const topicStats = useMemo(() => {
     if (!resultData || questions.length === 0) return [];
     const studentAnswers = resultData.answers_data || {};
@@ -299,7 +269,7 @@ function ResultsContent() {
     }));
   }, [resultData, questions]);
 
-  // Filtered Questions List
+  // Filtered Questions
   const filteredQuestions = useMemo(() => {
     if (!resultData) return questions;
     const studentAnswers = resultData.answers_data || {};
@@ -320,10 +290,10 @@ function ResultsContent() {
 
   if (isLoading) {
     return (
-      <div className="flex flex-col h-screen items-center justify-center bg-black text-white space-y-4">
-        <div className="w-8 h-8 border-2 border-white border-t-transparent animate-spin rounded-none" />
-        <div className="font-mono text-xs uppercase tracking-widest text-zinc-400">
-          Compiling Examination Audit & Solutions...
+      <div className="flex flex-col min-h-screen items-center justify-center bg-black text-zinc-100 space-y-3 font-sans">
+        <div className="w-6 h-6 border-2 border-zinc-700 border-t-zinc-200 animate-spin rounded-full" />
+        <div className="text-sm text-zinc-400 font-normal">
+          Loading scorecard and solutions...
         </div>
       </div>
     );
@@ -331,12 +301,12 @@ function ResultsContent() {
 
   if (errorMsg || !resultData) {
     return (
-      <div className="flex flex-col min-h-screen items-center justify-center bg-black text-white p-6">
+      <div className="flex flex-col min-h-screen items-center justify-center bg-black text-zinc-100 p-6 font-sans">
         <EmptyState
           icon={AlertCircle}
-          title="Scorecard Record Not Found"
-          description={errorMsg || "The requested examination result record cannot be retrieved or may have been removed."}
-          actionLabel="RETURN TO AVAILABLE TESTS"
+          title="Scorecard record not found"
+          description={errorMsg || "The requested scorecard cannot be retrieved."}
+          actionLabel="Return to available tests"
           actionHref="/student/tests"
         />
       </div>
@@ -354,14 +324,13 @@ function ResultsContent() {
 
   return (
     <div className="min-h-screen bg-black text-zinc-100 p-4 md:p-8 font-sans selection:bg-zinc-800 selection:text-white">
-      <div className="max-w-5xl mx-auto space-y-10 mt-2">
+      <div className="max-w-5xl mx-auto space-y-8 mt-2">
         <PageHeader
-          title={testTitle ? `${testTitle} — Scorecard` : "Examination Scorecard"}
-          badge={testTitle ? "EVALUATED" : undefined}
-          description="Detailed Performance Assessment & Verified Mathematical Solutions"
+          title={testTitle ? `${testTitle} — Scorecard` : "Examination scorecard"}
+          badge="Evaluated"
+          description="Performance assessment and verified mathematical solutions"
           breadcrumbs={[
-            { label: "Mathlete Pro", href: "/student/tests" },
-            { label: "Available Tests", href: "/student/tests" },
+            { label: "Available tests", href: "/student/tests" },
             { label: testTitle || "Scorecard" },
           ]}
           action={
@@ -370,17 +339,17 @@ function ResultsContent() {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="rounded-none border-zinc-800 bg-zinc-950 text-zinc-300 hover:bg-zinc-900 font-mono text-xs uppercase tracking-wider h-9"
+                  className="rounded-md border-zinc-800 bg-zinc-950 text-zinc-300 hover:bg-zinc-900 text-xs font-medium h-9"
                 >
-                  Available Tests
+                  Available tests
                 </Button>
               </Link>
               <Link href="/student/results">
                 <Button
                   size="sm"
-                  className="rounded-none bg-white text-black hover:bg-zinc-200 font-bold font-mono text-xs uppercase tracking-wider h-9"
+                  className="rounded-md bg-zinc-100 text-zinc-900 hover:bg-white text-xs font-medium h-9 transition-colors"
                 >
-                  My Results
+                  My results
                 </Button>
               </Link>
             </div>
@@ -389,8 +358,7 @@ function ResultsContent() {
 
         {/* 1. Hero Grid: Donut Chart, Scorecard, and Performance Rank */}
         <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
-          {/* Donut Chart & Scorecard Box */}
-          <Card className="md:col-span-7 bg-zinc-950 border-zinc-800 rounded-none p-6 flex flex-col sm:flex-row items-center gap-8 justify-between">
+          <Card className="md:col-span-7 bg-zinc-950 border-zinc-800 rounded-lg p-6 flex flex-col sm:flex-row items-center gap-6 justify-between shadow-sm">
             <DonutChart
               correct={correct}
               wrong={wrong}
@@ -400,89 +368,89 @@ function ResultsContent() {
 
             <div className="space-y-4 flex-1 w-full">
               <div>
-                <span className="text-[10px] font-mono uppercase tracking-widest text-zinc-500 font-bold block">
-                  Final Evaluated Score
+                <span className="text-xs text-zinc-500 font-normal block">
+                  Final evaluated score
                 </span>
                 <div className="flex items-baseline gap-2 mt-1">
                   <span
-                    className={`text-5xl font-black font-mono tracking-tight ${
+                    className={`text-4xl font-semibold font-mono tabular-nums tracking-tight ${
                       resultData.score > 0
                         ? "text-emerald-400"
                         : resultData.score < 0
                         ? "text-rose-400"
-                        : "text-white"
+                        : "text-zinc-100"
                     }`}
                   >
                     {resultData.score > 0 ? `+${resultData.score}` : resultData.score}
                   </span>
-                  <span className="text-zinc-500 font-mono text-xs">/ {maxPossibleMarks} M</span>
+                  <span className="text-zinc-500 text-xs font-mono tabular-nums">/ {maxPossibleMarks} marks</span>
                 </div>
               </div>
 
               {/* Counts legend */}
-              <div className="grid grid-cols-3 gap-2 font-mono text-xs pt-2 border-t border-zinc-900">
-                <div className="p-2 bg-black border border-emerald-950/60">
-                  <div className="text-[10px] uppercase text-emerald-500 font-bold">Correct</div>
-                  <div className="text-lg font-black text-white">+{correct * markingScheme.pos}</div>
-                  <div className="text-[10px] text-zinc-500">{correct} Qs</div>
+              <div className="grid grid-cols-3 gap-2 text-xs pt-2 border-t border-zinc-900">
+                <div className="p-2.5 rounded-md bg-zinc-900/40 border border-emerald-500/20">
+                  <div className="text-[11px] text-emerald-400 font-medium">Correct</div>
+                  <div className="text-base font-semibold font-mono tabular-nums text-zinc-100">+{correct * markingScheme.pos}</div>
+                  <div className="text-[10px] text-zinc-500">{correct} questions</div>
                 </div>
-                <div className="p-2 bg-black border border-rose-950/60">
-                  <div className="text-[10px] uppercase text-rose-500 font-bold">Wrong</div>
-                  <div className="text-lg font-black text-white">-{wrong * markingScheme.neg}</div>
-                  <div className="text-[10px] text-zinc-500">{wrong} Qs</div>
+                <div className="p-2.5 rounded-md bg-zinc-900/40 border border-rose-500/20">
+                  <div className="text-[11px] text-rose-400 font-medium">Incorrect</div>
+                  <div className="text-base font-semibold font-mono tabular-nums text-zinc-100">-{wrong * markingScheme.neg}</div>
+                  <div className="text-[10px] text-zinc-500">{wrong} questions</div>
                 </div>
-                <div className="p-2 bg-black border border-zinc-800">
-                  <div className="text-[10px] uppercase text-zinc-500 font-bold">Skipped</div>
-                  <div className="text-lg font-black text-white">0</div>
-                  <div className="text-[10px] text-zinc-500">{unattempted} Qs</div>
+                <div className="p-2.5 rounded-md bg-zinc-900/40 border border-zinc-800">
+                  <div className="text-[11px] text-zinc-400 font-medium">Skipped</div>
+                  <div className="text-base font-semibold font-mono tabular-nums text-zinc-100">0</div>
+                  <div className="text-[10px] text-zinc-500">{unattempted} questions</div>
                 </div>
               </div>
             </div>
           </Card>
 
-          {/* Rank, Percentile, Accuracy & Time Taken Box */}
-          <div className="md:col-span-5 grid grid-cols-2 gap-3 font-mono">
-            <div className="p-4 bg-zinc-950 border border-zinc-800 rounded-none flex flex-col justify-between">
-              <div className="flex items-center justify-between text-zinc-500 text-[10px] uppercase tracking-wider font-semibold">
-                <span>Rank In Cohort</span>
+          {/* Rank, Percentile, Accuracy & Time Box */}
+          <div className="md:col-span-5 grid grid-cols-2 gap-3">
+            <div className="p-4 bg-zinc-950 border border-zinc-800 rounded-lg flex flex-col justify-between shadow-sm">
+              <div className="flex items-center justify-between text-zinc-400 text-xs font-medium">
+                <span>Cohort rank</span>
                 <Award className="w-4 h-4 text-yellow-400" />
               </div>
-              <div>
-                <div className="text-2xl font-black text-white">#{rankInfo.rank}</div>
-                <p className="text-[10px] text-zinc-500 mt-0.5">Out of {rankInfo.totalCohort} attempts</p>
+              <div className="mt-3">
+                <div className="text-2xl font-semibold font-mono tabular-nums text-zinc-100">#{rankInfo.rank}</div>
+                <p className="text-xs text-zinc-500 font-normal mt-0.5">Out of {rankInfo.totalCohort} attempts</p>
               </div>
             </div>
 
-            <div className="p-4 bg-zinc-950 border border-zinc-800 rounded-none flex flex-col justify-between">
-              <div className="flex items-center justify-between text-zinc-500 text-[10px] uppercase tracking-wider font-semibold">
+            <div className="p-4 bg-zinc-950 border border-zinc-800 rounded-lg flex flex-col justify-between shadow-sm">
+              <div className="flex items-center justify-between text-zinc-400 text-xs font-medium">
                 <span>Percentile</span>
                 <TrendingUp className="w-4 h-4 text-emerald-400" />
               </div>
-              <div>
-                <div className="text-2xl font-black text-emerald-400">{rankInfo.percentile}%</div>
-                <p className="text-[10px] text-zinc-500 mt-0.5">Top percentile tier</p>
+              <div className="mt-3">
+                <div className="text-2xl font-semibold font-mono tabular-nums text-emerald-400">{rankInfo.percentile}%</div>
+                <p className="text-xs text-zinc-500 font-normal mt-0.5">Cohort ranking</p>
               </div>
             </div>
 
-            <div className="p-4 bg-zinc-950 border border-zinc-800 rounded-none flex flex-col justify-between">
-              <div className="flex items-center justify-between text-zinc-500 text-[10px] uppercase tracking-wider font-semibold">
+            <div className="p-4 bg-zinc-950 border border-zinc-800 rounded-lg flex flex-col justify-between shadow-sm">
+              <div className="flex items-center justify-between text-zinc-400 text-xs font-medium">
                 <span>Accuracy</span>
                 <BarChart2 className="w-4 h-4 text-cyan-400" />
               </div>
-              <div>
-                <div className="text-2xl font-black text-white">{accuracy}%</div>
-                <p className="text-[10px] text-zinc-500 mt-0.5">{correct} / {attempted} attempted</p>
+              <div className="mt-3">
+                <div className="text-2xl font-semibold font-mono tabular-nums text-zinc-100">{accuracy}%</div>
+                <p className="text-xs text-zinc-500 font-normal mt-0.5">{correct} / {attempted} attempted</p>
               </div>
             </div>
 
-            <div className="p-4 bg-zinc-950 border border-zinc-800 rounded-none flex flex-col justify-between">
-              <div className="flex items-center justify-between text-zinc-500 text-[10px] uppercase tracking-wider font-semibold">
-                <span>Time Taken</span>
+            <div className="p-4 bg-zinc-950 border border-zinc-800 rounded-lg flex flex-col justify-between shadow-sm">
+              <div className="flex items-center justify-between text-zinc-400 text-xs font-medium">
+                <span>Duration</span>
                 <Clock className="w-4 h-4 text-zinc-400" />
               </div>
-              <div>
-                <div className="text-2xl font-black text-white">{timeTaken}</div>
-                <p className="text-[10px] text-zinc-500 mt-0.5">Total duration spent</p>
+              <div className="mt-3">
+                <div className="text-base font-medium text-zinc-100">{timeTaken}</div>
+                <p className="text-xs text-zinc-500 font-normal mt-0.5">Time spent</p>
               </div>
             </div>
           </div>
@@ -490,30 +458,30 @@ function ResultsContent() {
 
         {/* 2. Topic-wise Accuracy Breakdown */}
         {topicStats.length > 0 && (
-          <section className="p-6 bg-zinc-950 border border-zinc-800 rounded-none space-y-4">
+          <section className="p-6 bg-zinc-950 border border-zinc-800 rounded-lg space-y-4 shadow-sm">
             <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
-              <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-zinc-400">
-                // Topic-wise Accuracy Breakdown
+              <h2 className="text-sm font-semibold text-zinc-200">
+                Topic-wise accuracy breakdown
               </h2>
-              <span className="text-[11px] font-mono text-zinc-500 uppercase">
-                {topicStats.length} Subject Domains
+              <span className="text-xs text-zinc-500 font-normal">
+                {topicStats.length} topics evaluated
               </span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
               {topicStats.map((item) => (
-                <div key={item.topic} className="p-4 bg-black border border-zinc-800 space-y-2 font-mono">
+                <div key={item.topic} className="p-3.5 rounded-md bg-zinc-900/40 border border-zinc-800 space-y-2">
                   <div className="flex justify-between items-center text-xs">
-                    <span className="font-bold text-white uppercase">{item.topic}</span>
-                    <span className="text-emerald-400 font-bold">{item.accuracy}%</span>
+                    <span className="font-medium text-zinc-200">{item.topic}</span>
+                    <span className="text-emerald-400 font-semibold font-mono tabular-nums">{item.accuracy}%</span>
                   </div>
-                  <div className="w-full bg-zinc-900 h-2 border border-zinc-800 overflow-hidden">
+                  <div className="w-full bg-zinc-900 h-1.5 rounded-full border border-zinc-800 overflow-hidden">
                     <div
-                      className="bg-emerald-500 h-full transition-all duration-300"
+                      className="bg-emerald-500 h-full rounded-full transition-all duration-300"
                       style={{ width: `${item.accuracy}%` }}
                     />
                   </div>
-                  <div className="flex justify-between text-[10px] text-zinc-500">
+                  <div className="flex justify-between text-[11px] text-zinc-500 font-normal">
                     <span>{item.correct} correct</span>
                     <span>{item.total} inquiries</span>
                   </div>
@@ -524,24 +492,24 @@ function ResultsContent() {
         )}
 
         {/* 3. Question-by-Question Review with Filters */}
-        <section className="space-y-6 pt-4 border-t border-zinc-800">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-zinc-900 pb-4">
+        <section className="space-y-6 pt-2">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-zinc-800 pb-4">
             <div>
-              <h2 className="text-xl font-bold uppercase tracking-tight text-white font-mono">
-                Item-by-Item Review & KaTeX Derivations
+              <h2 className="text-lg font-semibold tracking-tight text-zinc-100">
+                Detailed question solutions
               </h2>
-              <p className="text-xs text-zinc-500 font-mono uppercase tracking-widest mt-0.5">
+              <p className="text-xs text-zinc-400 font-normal mt-0.5">
                 Verify choices against official faculties explanations
               </p>
             </div>
 
             {/* Filter Tabs */}
-            <div className="flex items-center gap-1.5 p-1 bg-zinc-950 border border-zinc-800 font-mono text-xs self-start sm:self-auto">
+            <div className="flex items-center gap-1 p-1 rounded-lg bg-zinc-950 border border-zinc-800 text-xs font-medium self-start sm:self-auto">
               <button
                 type="button"
                 onClick={() => setFilter("all")}
-                className={`px-3 py-1 uppercase tracking-wider font-bold transition-colors ${
-                  filter === "all" ? "bg-white text-black" : "text-zinc-400 hover:text-white"
+                className={`px-3 py-1.5 rounded-md transition-colors ${
+                  filter === "all" ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:text-zinc-200"
                 }`}
               >
                 All ({questions.length})
@@ -549,8 +517,8 @@ function ResultsContent() {
               <button
                 type="button"
                 onClick={() => setFilter("correct")}
-                className={`px-3 py-1 uppercase tracking-wider font-bold transition-colors ${
-                  filter === "correct" ? "bg-emerald-500 text-black" : "text-zinc-400 hover:text-emerald-400"
+                className={`px-3 py-1.5 rounded-md transition-colors ${
+                  filter === "correct" ? "bg-emerald-950/60 text-emerald-400 border border-emerald-500/30" : "text-zinc-400 hover:text-emerald-400"
                 }`}
               >
                 Correct ({correct})
@@ -558,17 +526,17 @@ function ResultsContent() {
               <button
                 type="button"
                 onClick={() => setFilter("wrong")}
-                className={`px-3 py-1 uppercase tracking-wider font-bold transition-colors ${
-                  filter === "wrong" ? "bg-rose-500 text-white" : "text-zinc-400 hover:text-rose-400"
+                className={`px-3 py-1.5 rounded-md transition-colors ${
+                  filter === "wrong" ? "bg-rose-950/60 text-rose-400 border border-rose-500/30" : "text-zinc-400 hover:text-rose-400"
                 }`}
               >
-                Wrong ({wrong})
+                Incorrect ({wrong})
               </button>
               <button
                 type="button"
                 onClick={() => setFilter("unattempted")}
-                className={`px-3 py-1 uppercase tracking-wider font-bold transition-colors ${
-                  filter === "unattempted" ? "bg-zinc-700 text-white" : "text-zinc-400 hover:text-zinc-200"
+                className={`px-3 py-1.5 rounded-md transition-colors ${
+                  filter === "unattempted" ? "bg-zinc-800 text-zinc-200" : "text-zinc-400 hover:text-zinc-200"
                 }`}
               >
                 Skipped ({unattempted})
@@ -577,16 +545,21 @@ function ResultsContent() {
           </div>
 
           {filteredQuestions.length === 0 ? (
-            <div className="p-8 border border-zinc-800 bg-zinc-950 text-center font-mono text-xs text-zinc-500 uppercase tracking-widest">
+            <div className="p-8 border border-zinc-800 bg-zinc-950 text-center text-xs text-zinc-500 font-normal rounded-lg">
               No questions match the selected filter ({filter}).
             </div>
           ) : (
-            <div className="space-y-6">
+            <div className="space-y-5">
               {filteredQuestions.map((q) => {
                 const globalIndex = questions.findIndex((item) => item.id === q.id);
                 let parsedOptions: string[] = [];
                 try {
-                  parsedOptions = typeof q.options === "string" ? JSON.parse(q.options) : q.options;
+                  parsedOptions =
+                    typeof q.options === "string"
+                      ? JSON.parse(q.options)
+                      : Array.isArray(q.options)
+                      ? q.options
+                      : [];
                 } catch {
                   parsedOptions = [];
                 }
@@ -600,59 +573,59 @@ function ResultsContent() {
                 const isSkipped = studentOptIdx === null;
 
                 return (
-                  <Card key={q.id} className="bg-zinc-950 border-zinc-800 rounded-none shadow-none space-y-4 p-6">
+                  <Card key={q.id} className="bg-zinc-950 border-zinc-800 rounded-lg shadow-sm space-y-4 p-5 sm:p-6">
                     {/* Header */}
                     <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
-                      <div className="flex items-center gap-3">
-                        <span className="font-mono text-xs font-bold text-zinc-400 uppercase tracking-wider">
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-xs font-semibold text-zinc-300">
                           Question {globalIndex + 1}
                         </span>
                         {q.topic && (
                           <>
-                            <span className="text-zinc-700 font-mono">•</span>
-                            <span className="font-mono text-[11px] text-zinc-500 uppercase">{q.topic}</span>
+                            <span className="text-zinc-600">•</span>
+                            <span className="text-xs text-zinc-400 font-normal">{q.topic}</span>
                           </>
                         )}
                       </div>
 
                       <div>
                         {isCorrect && (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 text-xs font-medium rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                             <CheckCircle2 className="w-3.5 h-3.5" /> +{markingScheme.pos} Correct
                           </span>
                         )}
                         {isWrong && (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono font-bold uppercase tracking-wider bg-rose-500/10 text-rose-400 border border-rose-500/30">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 text-xs font-medium rounded bg-rose-500/10 text-rose-400 border border-rose-500/20">
                             <XCircle className="w-3.5 h-3.5" /> -{markingScheme.neg} Incorrect
                           </span>
                         )}
                         {isSkipped && (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono font-bold uppercase tracking-wider bg-zinc-900 text-zinc-400 border border-zinc-800">
-                            <HelpCircle className="w-3.5 h-3.5" /> 0 Unattempted
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 text-xs font-medium rounded bg-zinc-900 text-zinc-400 border border-zinc-800">
+                            <HelpCircle className="w-3.5 h-3.5" /> 0 Skipped
                           </span>
                         )}
                       </div>
                     </div>
 
-                    {/* Statement */}
-                    <div className="p-4 bg-black border border-zinc-800 text-base md:text-lg text-zinc-100 leading-relaxed font-sans space-y-4">
-                      <Latex>{q.statement}</Latex>
+                    {/* Statement with MathRenderer */}
+                    <div className="p-4 bg-zinc-900/40 border border-zinc-800 rounded-md text-sm md:text-base text-zinc-200 leading-relaxed space-y-3 font-normal">
+                      <MathRenderer content={q.statement} />
                       {q.image_url && (
                         <div className="pt-2">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
                             src={q.image_url}
-                            alt="Question Diagram"
-                            className="max-h-72 max-w-full object-contain border border-zinc-800 bg-zinc-950"
+                            alt="Question diagram"
+                            className="max-h-72 max-w-full object-contain border border-zinc-800 bg-zinc-950 rounded"
                           />
                         </div>
                       )}
                     </div>
 
-                    {/* Options list */}
-                    <div className="space-y-2 pt-2">
-                      <div className="font-mono text-[11px] text-zinc-500 uppercase tracking-wider font-semibold">
-                        Evaluated Choices:
+                    {/* Evaluated Options */}
+                    <div className="space-y-2 pt-1">
+                      <div className="text-xs text-zinc-400 font-medium">
+                        Options:
                       </div>
 
                       <div className="grid grid-cols-1 gap-2">
@@ -660,44 +633,44 @@ function ResultsContent() {
                           const isThisCorrect = optIdx === q.correct_option_index;
                           const isThisSelected = studentOptIdx === optIdx;
 
-                          let borderClass = "border-zinc-800 bg-zinc-900/30 text-zinc-400";
+                          let borderClass = "border-zinc-800 bg-zinc-900/30 text-zinc-300";
                           if (isThisCorrect && isThisSelected) {
-                            borderClass = "border-emerald-500 bg-emerald-950/20 text-emerald-200 font-medium";
+                            borderClass = "border-emerald-500/60 bg-emerald-950/20 text-emerald-200";
                           } else if (isThisCorrect && !isThisSelected) {
-                            borderClass = "border-emerald-600/70 bg-emerald-950/10 text-emerald-300 font-medium";
+                            borderClass = "border-emerald-500/40 bg-emerald-950/10 text-emerald-300";
                           } else if (!isThisCorrect && isThisSelected) {
-                            borderClass = "border-rose-500 bg-rose-950/20 text-rose-200 font-medium";
+                            borderClass = "border-rose-500/60 bg-rose-950/20 text-rose-200";
                           }
 
                           return (
                             <div
                               key={optIdx}
-                              className={`flex items-center justify-between p-3.5 border rounded-none transition-colors ${borderClass}`}
+                              className={`flex items-center justify-between p-3.5 border rounded-md transition-colors text-sm ${borderClass}`}
                             >
                               <div className="flex items-center gap-3">
-                                <span className="font-mono text-xs font-bold w-6 h-6 flex items-center justify-center border border-zinc-800 bg-black text-zinc-300 shrink-0">
+                                <span className="text-xs font-medium w-6 h-6 rounded flex items-center justify-center border border-zinc-800 bg-zinc-900 text-zinc-300 shrink-0">
                                   {String.fromCharCode(65 + optIdx)}
                                 </span>
-                                <div className="text-base text-zinc-100">
-                                  <Latex>{optText}</Latex>
+                                <div className="text-sm text-zinc-200">
+                                  <MathRenderer content={optText} />
                                 </div>
                               </div>
 
                               <div className="flex items-center gap-2">
                                 {isThisSelected && (
                                   <span
-                                    className={`px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider border ${
+                                    className={`px-2 py-0.5 text-[11px] font-medium rounded border ${
                                       isThisCorrect
-                                        ? "border-emerald-500/60 bg-emerald-500/20 text-emerald-300"
-                                        : "border-rose-500/60 bg-rose-500/20 text-rose-300"
+                                        ? "border-emerald-500/40 bg-emerald-500/20 text-emerald-300"
+                                        : "border-rose-500/40 bg-rose-500/20 text-rose-300"
                                     }`}
                                   >
-                                    Your Answer
+                                    Your response
                                   </span>
                                 )}
                                 {isThisCorrect && (
-                                  <span className="px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider border border-emerald-500/60 bg-emerald-500/20 text-emerald-300">
-                                    Correct Answer
+                                  <span className="px-2 py-0.5 text-[11px] font-medium rounded border border-emerald-500/40 bg-emerald-500/20 text-emerald-300">
+                                    Correct answer
                                   </span>
                                 )}
                               </div>
@@ -707,18 +680,18 @@ function ResultsContent() {
                       </div>
                     </div>
 
-                    {/* Solution Explanation Box */}
+                    {/* Official Solution */}
                     {q.solution && q.solution.trim() !== "" ? (
-                      <div className="mt-4 p-4 border border-zinc-800 bg-black/80 rounded-none space-y-2">
-                        <div className="flex items-center gap-2 font-mono text-xs text-zinc-400 font-semibold uppercase tracking-wider">
-                          <span>// Official Verification & Solution</span>
+                      <div className="mt-3 p-4 border border-zinc-800 bg-zinc-900/50 rounded-md space-y-1.5">
+                        <div className="text-xs text-zinc-400 font-medium">
+                          Official explanation & solution:
                         </div>
-                        <div className="text-sm text-zinc-300 leading-relaxed font-sans pt-1">
-                          <Latex>{q.solution}</Latex>
+                        <div className="text-sm text-zinc-300 leading-relaxed font-normal pt-1">
+                          <MathRenderer content={q.solution} />
                         </div>
                       </div>
                     ) : (
-                      <div className="p-3 border border-zinc-900 bg-black/40 text-xs font-mono text-zinc-600 uppercase">
+                      <div className="p-3 border border-zinc-900 bg-zinc-950 text-xs text-zinc-500 font-normal rounded">
                         No written derivation provided for this inquiry.
                       </div>
                     )}
@@ -729,20 +702,20 @@ function ResultsContent() {
           )}
         </section>
 
-        {/* Bottom Actions */}
-        <div className="pt-8 border-t border-zinc-800 flex flex-col sm:flex-row justify-between items-center gap-4">
+        {/* Bottom Navigation Actions */}
+        <div className="pt-6 border-t border-zinc-800 flex flex-col sm:flex-row justify-between items-center gap-3 pb-8">
           <Link href="/student/tests" className="w-full sm:w-auto">
             <Button
               variant="outline"
-              className="w-full sm:w-auto rounded-none border-zinc-800 bg-black text-zinc-300 hover:bg-zinc-900 font-mono text-xs uppercase tracking-wider h-12 px-6"
+              className="w-full sm:w-auto rounded-md border-zinc-800 bg-zinc-950 text-zinc-300 hover:bg-zinc-900 text-sm font-medium h-10 px-5"
             >
-              Return to Available Tests
+              Return to available tests
             </Button>
           </Link>
 
           <Link href="/student/results" className="w-full sm:w-auto">
-            <Button className="w-full sm:w-auto rounded-none bg-white text-black hover:bg-zinc-200 font-bold font-mono text-xs uppercase tracking-wider h-12 px-8">
-              View Performance History
+            <Button className="w-full sm:w-auto rounded-md bg-zinc-100 text-zinc-900 hover:bg-white text-sm font-medium h-10 px-6 transition-colors">
+              View examination history
             </Button>
           </Link>
         </div>
@@ -755,8 +728,8 @@ export default function ResultsPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen bg-black text-zinc-100 flex items-center justify-center font-mono text-xs uppercase tracking-widest">
-          Loading Examination Assessment...
+        <div className="min-h-screen bg-black text-zinc-400 flex items-center justify-center text-sm font-normal font-sans">
+          Loading scorecard...
         </div>
       }
     >

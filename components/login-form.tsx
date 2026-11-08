@@ -18,8 +18,11 @@ import { useState } from "react";
 
 export function LoginForm({
   className,
+  onSwitchToSignUp,
   ...props
-}: React.ComponentPropsWithoutRef<"div">) {
+}: React.ComponentPropsWithoutRef<"div"> & {
+  onSwitchToSignUp?: () => void;
+}) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +43,6 @@ export function LoginForm({
       if (error) throw error;
 
       if (data?.user) {
-        // Fetch role to determine redirect
         const { data: profile } = await supabase
           .from("profiles")
           .select("role")
@@ -57,7 +59,7 @@ export function LoginForm({
       }
       router.refresh();
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : "An error occurred";
+      const msg = error instanceof Error ? error.message : "An error occurred during authentication.";
       setError(msg);
     } finally {
       setIsLoading(false);
@@ -66,83 +68,95 @@ export function LoginForm({
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <Card className="rounded-none border-zinc-800 bg-zinc-950 text-white shadow-xl">
-        <CardHeader className="space-y-1">
+      <Card className="rounded-lg border-zinc-800 bg-zinc-950 text-zinc-100 shadow-xl">
+        <CardHeader className="space-y-1.5 pb-4">
           <div className="flex items-center gap-2 mb-1">
-            <div className="w-5 h-5 bg-white text-black font-black text-xs flex items-center justify-center font-mono">
+            <div className="w-6 h-6 rounded bg-zinc-100 text-zinc-950 font-semibold text-xs flex items-center justify-center">
               M
             </div>
-            <span className="font-mono text-xs uppercase tracking-widest text-zinc-400">
+            <span className="text-sm font-semibold tracking-tight text-zinc-200">
               Mathlete Pro
             </span>
           </div>
-          <CardTitle className="text-2xl font-black uppercase tracking-tight">Platform Access</CardTitle>
-          <CardDescription className="text-zinc-400 text-xs font-mono">
-            Sign in with your registered academic credentials
+          <CardTitle className="text-xl font-semibold tracking-tight text-zinc-100">
+            Sign in
+          </CardTitle>
+          <CardDescription className="text-zinc-400 text-sm font-normal">
+            Enter your email and password to access examinations
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleLogin}>
-            <div className="flex flex-col gap-5">
-              <div className="grid gap-2">
-                <Label htmlFor="email" className="font-mono text-xs uppercase text-zinc-300">
-                  Academic Email
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="email" className="text-sm font-normal text-zinc-300">
+                Email address
+              </Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="name@school.edu"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="rounded-md border-zinc-800 bg-zinc-900/60 text-zinc-100 text-sm placeholder:text-zinc-500 focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600 h-10"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="password" className="text-sm font-normal text-zinc-300">
+                  Password
                 </Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="student@mathletepro.com"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="rounded-none border-zinc-800 bg-black text-white font-mono text-xs focus:border-zinc-600 h-10"
-                />
+                <Link
+                  href="/auth/forgot-password"
+                  className="text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
+                >
+                  Forgot password?
+                </Link>
               </div>
-              <div className="grid gap-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="password" className="font-mono text-xs uppercase text-zinc-300">
-                    Password
-                  </Label>
-                  <Link
-                    href="/auth/forgot-password"
-                    className="font-mono text-[11px] text-zinc-400 hover:text-white underline underline-offset-4"
-                  >
-                    Forgot password?
-                  </Link>
-                </div>
-                <Input
-                  id="password"
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="rounded-none border-zinc-800 bg-black text-white font-mono text-xs focus:border-zinc-600 h-10"
-                />
+              <Input
+                id="password"
+                type="password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="rounded-md border-zinc-800 bg-zinc-900/60 text-zinc-100 text-sm placeholder:text-zinc-500 focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600 h-10"
+              />
+            </div>
+
+            {error && (
+              <div className="p-3 border border-red-500/20 bg-red-950/30 text-red-400 text-sm rounded-md">
+                {error}
               </div>
-              {error && (
-                <div className="p-3 border border-red-500/40 bg-red-950/20 text-red-400 text-xs font-mono leading-relaxed">
-                  {error}
-                </div>
+            )}
+
+            <Button
+              type="submit"
+              disabled={isLoading}
+              className="w-full h-10 rounded-md bg-zinc-100 text-zinc-900 hover:bg-white font-medium text-sm transition-colors mt-2"
+            >
+              {isLoading ? "Signing in..." : "Sign in"}
+            </Button>
+
+            <div className="text-center text-sm text-zinc-400 pt-2">
+              Don&apos;t have an account?{" "}
+              {onSwitchToSignUp ? (
+                <button
+                  type="button"
+                  onClick={onSwitchToSignUp}
+                  className="text-zinc-200 underline underline-offset-4 hover:text-white transition-colors font-medium"
+                >
+                  Create account
+                </button>
+              ) : (
+                <Link
+                  href="/auth/sign-up"
+                  className="text-zinc-200 underline underline-offset-4 hover:text-white transition-colors font-medium"
+                >
+                  Create account
+                </Link>
               )}
-              <Button
-                type="submit"
-                className="w-full rounded-none bg-white text-black hover:bg-zinc-200 font-mono text-xs font-bold uppercase tracking-wider h-11"
-                disabled={isLoading}
-              >
-                {isLoading ? "Authenticating..." : "Authorize Sign In"}
-              </Button>
             </div>
           </form>
-
-          <div className="mt-6 pt-5 border-t border-zinc-900 text-center text-xs font-mono text-zinc-500">
-            Don&apos;t have an account?{" "}
-            <Link
-              href="/auth/sign-up"
-              className="text-zinc-300 hover:text-white underline underline-offset-4"
-            >
-              Register here
-            </Link>
-          </div>
         </CardContent>
       </Card>
     </div>

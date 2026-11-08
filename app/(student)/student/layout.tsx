@@ -15,8 +15,8 @@ export default function StudentLayout({
   return (
     <Suspense
       fallback={
-        <div className="flex h-screen items-center justify-center bg-black text-white font-mono text-xs uppercase tracking-widest">
-          Authorizing Student Credentials...
+        <div className="flex h-screen items-center justify-center bg-black text-zinc-400 text-sm font-normal">
+          Authorizing student session...
         </div>
       }
     >

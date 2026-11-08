@@ -33,14 +33,13 @@ export function ForgotPasswordForm({
     setError(null);
 
     try {
-      // The url which will be included in the email. This URL needs to be configured in your redirect URLs in the Supabase dashboard at https://supabase.com/dashboard/project/_/auth/url-configuration
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo: `${window.location.origin}/auth/update-password`,
       });
       if (error) throw error;
       setSuccess(true);
     } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : "An error occurred");
+      setError(error instanceof Error ? error.message : "An error occurred.");
     } finally {
       setIsLoading(false);
     }
@@ -49,53 +48,84 @@ export function ForgotPasswordForm({
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       {success ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-2xl">Check Your Email</CardTitle>
-            <CardDescription>Password reset instructions sent</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">
-              If you registered using your email and password, you will receive
-              a password reset email.
-            </p>
-          </CardContent>
-        </Card>
-      ) : (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-2xl">Reset Your Password</CardTitle>
-            <CardDescription>
-              Type in your email and we&apos;ll send you a link to reset your
-              password
+        <Card className="rounded-lg border-zinc-800 bg-zinc-950 text-zinc-100 shadow-xl">
+          <CardHeader className="space-y-1.5 pb-4">
+            <CardTitle className="text-xl font-semibold tracking-tight text-zinc-100">
+              Check your email
+            </CardTitle>
+            <CardDescription className="text-zinc-400 text-sm font-normal">
+              Password reset link has been dispatched to {email}
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleForgotPassword}>
-              <div className="flex flex-col gap-6">
-                <div className="grid gap-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="m@example.com"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
-                </div>
-                {error && <p className="text-sm text-red-500">{error}</p>}
-                <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? "Sending..." : "Send reset email"}
+            <p className="text-sm text-zinc-300">
+              If an account exists for this academic email, you will receive password reset instructions shortly.
+            </p>
+            <div className="mt-6">
+              <Link href="/auth/login">
+                <Button className="w-full h-10 rounded-md bg-zinc-100 text-zinc-900 hover:bg-white font-medium text-sm transition-colors">
+                  Return to sign in
                 </Button>
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="rounded-lg border-zinc-800 bg-zinc-950 text-zinc-100 shadow-xl">
+          <CardHeader className="space-y-1.5 pb-4">
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-6 h-6 rounded bg-zinc-100 text-zinc-950 font-semibold text-xs flex items-center justify-center">
+                M
               </div>
-              <div className="mt-4 text-center text-sm">
-                Already have an account?{" "}
+              <span className="text-sm font-semibold tracking-tight text-zinc-200">
+                Mathlete Pro
+              </span>
+            </div>
+            <CardTitle className="text-xl font-semibold tracking-tight text-zinc-100">
+              Reset password
+            </CardTitle>
+            <CardDescription className="text-zinc-400 text-sm font-normal">
+              Enter your email to receive recovery instructions
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleForgotPassword} className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="email" className="text-sm font-normal text-zinc-300">
+                  Email address
+                </Label>
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="name@school.edu"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="rounded-md border-zinc-800 bg-zinc-900/60 text-zinc-100 text-sm placeholder:text-zinc-500 focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600 h-10"
+                />
+              </div>
+
+              {error && (
+                <div className="p-3 border border-red-500/20 bg-red-950/30 text-red-400 text-sm rounded-md">
+                  {error}
+                </div>
+              )}
+
+              <Button
+                type="submit"
+                disabled={isLoading}
+                className="w-full h-10 rounded-md bg-zinc-100 text-zinc-900 hover:bg-white font-medium text-sm transition-colors mt-2"
+              >
+                {isLoading ? "Sending link..." : "Send reset link"}
+              </Button>
+
+              <div className="text-center text-sm text-zinc-400 pt-2">
+                Remember your password?{" "}
                 <Link
                   href="/auth/login"
-                  className="underline underline-offset-4"
+                  className="text-zinc-200 underline underline-offset-4 hover:text-white transition-colors font-medium"
                 >
-                  Login
+                  Sign in
                 </Link>
               </div>
             </form>

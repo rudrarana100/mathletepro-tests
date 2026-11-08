@@ -1,6 +1,13 @@
 import type { Metadata } from "next";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import { ToastProvider } from "@/components/Toast";
+
+const inter = Inter({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-inter",
+});
 
 export const metadata: Metadata = {
   title: {
@@ -13,7 +20,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" className={`dark ${inter.variable}`}>
       <head>
         {/* KaTeX math fonts and CSS */}
         <link
@@ -21,7 +28,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css"
         />
       </head>
-      <body className="bg-black text-white antialiased selection:bg-zinc-800 selection:text-white">
+      <body className={`${inter.className} bg-black text-zinc-100 antialiased selection:bg-zinc-800 selection:text-white`}>
         <ToastProvider>{children}</ToastProvider>
       </body>
     </html>

@@ -15,8 +15,8 @@ export default function AdminLayout({
   return (
     <Suspense
       fallback={
-        <div className="flex h-screen items-center justify-center bg-black text-white font-mono text-xs uppercase tracking-widest">
-          Verifying Faculty Credentials...
+        <div className="flex h-screen items-center justify-center bg-black text-zinc-400 text-sm font-normal">
+          Verifying faculty credentials...
         </div>
       }
     >

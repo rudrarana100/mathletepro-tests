@@ -27,7 +27,33 @@ export async function POST(req: Request) {
       );
     }
 
-    // Fetch test details from live Supabase
+    // 1. Try atomic server RPC: start_exam_attempt
+    try {
+      const { data: rpcData, error: rpcError } = await supabase.rpc(
+        "start_exam_attempt",
+        { p_test_id: testId }
+      );
+
+      if (!rpcError && rpcData) {
+        if (rpcData.alreadyCompleted) {
+          return NextResponse.json(
+            {
+              error: "You have already completed and submitted this examination.",
+              alreadyCompleted: true,
+              resultId: rpcData.resultId,
+              score: rpcData.score,
+            },
+            { status: 403 }
+          );
+        }
+
+        return NextResponse.json(rpcData);
+      }
+    } catch {
+      // Fall through to manual server verification if RPC is not installed
+    }
+
+    // 2. Fallback path: verify test and manage attempt in public.attempts
     const { data: testData, error: testError } = await supabase
       .from("tests")
       .select("id, title, duration_minutes, positive_marks, negative_marks, is_published, start_time, end_time")
@@ -63,7 +89,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // Check for existing attempt in test_results
+    // Check for existing completion in test_results
     const { data: existingResult } = await supabase
       .from("test_results")
       .select("id")
@@ -83,30 +109,82 @@ export async function POST(req: Request) {
     }
 
     const durationMinutes = testData.duration_minutes || 60;
-    const totalAllowedSeconds = durationMinutes * 60;
+    const nowIso = now.toISOString();
 
-    // Fetch questions strictly without correct answers/solutions for test integrity
-    // Uses the safe student_questions view (omits correct_option_index and solution)
+    // Fetch or create attempt in public.attempts
+    let attemptStartTime = nowIso;
+    let attemptEndTime = new Date(now.getTime() + durationMinutes * 60 * 1000).toISOString();
+    let currentStrikes = 0;
+    let remainingSeconds = durationMinutes * 60;
+
+    const { data: existingAttempt } = await supabase
+      .from("attempts")
+      .select("id, status, started_at, end_time, strikes, result_id")
+      .eq("user_id", user.id)
+      .eq("test_id", testId)
+      .maybeSingle();
+
+    if (existingAttempt) {
+      if (existingAttempt.status === "completed" && existingAttempt.result_id) {
+        return NextResponse.json(
+          {
+            error: "You have already completed and submitted this examination.",
+            alreadyCompleted: true,
+            resultId: existingAttempt.result_id,
+          },
+          { status: 403 }
+        );
+      }
+
+      attemptStartTime = existingAttempt.started_at;
+      currentStrikes = existingAttempt.strikes || 0;
+
+      if (existingAttempt.end_time) {
+        attemptEndTime = existingAttempt.end_time;
+        const diffSec = Math.floor((new Date(existingAttempt.end_time).getTime() - Date.now()) / 1000);
+        remainingSeconds = Math.max(0, diffSec);
+      } else {
+        // Backfill end_time
+        attemptEndTime = new Date(new Date(existingAttempt.started_at).getTime() + durationMinutes * 60 * 1000).toISOString();
+        const diffSec = Math.floor((new Date(attemptEndTime).getTime() - Date.now()) / 1000);
+        remainingSeconds = Math.max(0, diffSec);
+        await supabase
+          .from("attempts")
+          .update({ end_time: attemptEndTime })
+          .eq("id", existingAttempt.id);
+      }
+    } else {
+      // Create new in-progress attempt
+      await supabase.from("attempts").insert({
+        user_id: user.id,
+        test_id: testId,
+        status: "in_progress",
+        started_at: attemptStartTime,
+        end_time: attemptEndTime,
+        strikes: 0,
+      });
+    }
+
+    // Fetch questions strictly without answers/solutions (safe student_questions view)
     let questions = null;
     const { data: viewQuestions, error: viewError } = await supabase
       .from("student_questions")
-      .select("id, statement, options, image_url")
+      .select("id, statement, options, image_url, topic, difficulty")
       .eq("test_id", testId)
       .order("created_at", { ascending: true });
 
     if (!viewError && viewQuestions !== null) {
       questions = viewQuestions;
     } else {
-      // Fallback to questions table if student_questions view is not yet migrated
       const { data: tableQuestions, error: tableError } = await supabase
         .from("questions")
-        .select("id, statement, options, image_url")
+        .select("id, statement, options, image_url, topic, difficulty")
         .eq("test_id", testId)
         .order("created_at", { ascending: true });
 
       if (tableError) {
         return NextResponse.json(
-          { error: "Failed to retrieve examination inquiries." },
+          { error: "Failed to retrieve examination questions." },
           { status: 500 }
         );
       }
@@ -123,9 +201,10 @@ export async function POST(req: Request) {
         negative_marks: testData.negative_marks ?? 1,
       },
       questions: questions || [],
-      remainingSeconds: totalAllowedSeconds,
-      startedAt: new Date().toISOString(),
-      strikes: 0,
+      remainingSeconds,
+      startedAt: attemptStartTime,
+      endTime: attemptEndTime,
+      strikes: currentStrikes,
     });
   } catch (err) {
     const errorMsg =

@@ -1,18 +1,16 @@
 -- ================================================================
--- Mathlete Pro: Consolidated Production Schema & RLS Lockdown
+-- Mathlete Pro: Consolidated Master Production Schema & RLS Lockdown
 -- ================================================================
 -- Execute this complete script in the Supabase SQL Editor.
 -- It safely upgrades existing tables (adding any missing columns),
 -- creates recursive-safe is_admin() helper, applies row-level security
--- policies, creates the safe student_questions view, and sets up
--- the atomic server-side grade_and_submit_exam RPC.
+-- policies across all tables, creates the safe student_questions view,
+-- and registers atomic server-side RPCs for starting and grading exams.
 -- Idempotent: can be executed safely multiple times.
 -- ================================================================
 
 -- ----------------------------------------------------------------
 -- 1. Helper Function: is_admin()
--- Checks if the authenticated caller has role = 'admin' in profiles.
--- Marked SECURITY DEFINER with explicit search_path to prevent recursion.
 -- ----------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.is_admin()
 RETURNS boolean AS $$
@@ -23,6 +21,8 @@ BEGIN
     );
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+GRANT EXECUTE ON FUNCTION public.is_admin() TO authenticated;
 
 -- ----------------------------------------------------------------
 -- 2. Profiles Table & Security
@@ -35,7 +35,6 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
--- Ensure all columns exist if table was created previously
 ALTER TABLE public.profiles
 ADD COLUMN IF NOT EXISTS email TEXT,
 ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'student',
@@ -44,17 +43,12 @@ ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc':
 
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "Users can read own profile" ON public.profiles;
-DROP POLICY IF EXISTS "Admins can view all profiles" ON public.profiles;
 DROP POLICY IF EXISTS "Users can read own profile, admins can read all" ON public.profiles;
-
 CREATE POLICY "Users can read own profile, admins can read all"
 ON public.profiles FOR SELECT TO authenticated
 USING (auth.uid() = id OR public.is_admin());
 
-DROP POLICY IF EXISTS "Admins can update profiles" ON public.profiles;
 DROP POLICY IF EXISTS "Users can update own profile, admins can update any" ON public.profiles;
-
 CREATE POLICY "Users can update own profile, admins can update any"
 ON public.profiles FOR UPDATE TO authenticated
 USING (auth.uid() = id OR public.is_admin())
@@ -76,7 +70,7 @@ CREATE TRIGGER tr_check_profile_role
     BEFORE UPDATE ON public.profiles
     FOR EACH ROW EXECUTE FUNCTION public.check_profile_role_update();
 
--- Automatic profile creation on signup (always student role)
+-- Auto-create profile on signup (always student)
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS trigger AS $$
 BEGIN
@@ -97,8 +91,6 @@ CREATE TRIGGER on_auth_user_created
     AFTER INSERT ON auth.users
     FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
-CREATE INDEX IF NOT EXISTS idx_profiles_role ON public.profiles(role);
-
 -- ----------------------------------------------------------------
 -- 3. Tests Table & Security
 -- ----------------------------------------------------------------
@@ -114,7 +106,6 @@ CREATE TABLE IF NOT EXISTS public.tests (
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
--- Safely add missing columns if the tests table already existed
 ALTER TABLE public.tests
 ADD COLUMN IF NOT EXISTS duration_minutes INTEGER NOT NULL DEFAULT 60,
 ADD COLUMN IF NOT EXISTS positive_marks NUMERIC NOT NULL DEFAULT 4,
@@ -126,28 +117,23 @@ ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc':
 
 ALTER TABLE public.tests ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "Anyone can view published tests" ON public.tests;
-DROP POLICY IF EXISTS "Anyone authenticated can view published tests" ON public.tests;
 DROP POLICY IF EXISTS "Students can view published tests, admins can view all" ON public.tests;
-
 CREATE POLICY "Students can view published tests, admins can view all"
 ON public.tests FOR SELECT TO authenticated
 USING (is_published = true OR public.is_admin());
 
-DROP POLICY IF EXISTS "Only admins can modify tests" ON public.tests;
 DROP POLICY IF EXISTS "Only admins can insert tests" ON public.tests;
-DROP POLICY IF EXISTS "Only admins can update tests" ON public.tests;
-DROP POLICY IF EXISTS "Only admins can delete tests" ON public.tests;
-
 CREATE POLICY "Only admins can insert tests"
 ON public.tests FOR INSERT TO authenticated
 WITH CHECK (public.is_admin());
 
+DROP POLICY IF EXISTS "Only admins can update tests" ON public.tests;
 CREATE POLICY "Only admins can update tests"
 ON public.tests FOR UPDATE TO authenticated
 USING (public.is_admin())
 WITH CHECK (public.is_admin());
 
+DROP POLICY IF EXISTS "Only admins can delete tests" ON public.tests;
 CREATE POLICY "Only admins can delete tests"
 ON public.tests FOR DELETE TO authenticated
 USING (public.is_admin());
@@ -155,7 +141,7 @@ USING (public.is_admin());
 CREATE INDEX IF NOT EXISTS idx_tests_published_schedule ON public.tests(is_published, start_time, end_time);
 
 -- ----------------------------------------------------------------
--- 4. Questions Table, Zero Answer Leakage RLS & Safe View
+-- 4. Questions Table, Security & Safe View
 -- ----------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.questions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -170,7 +156,6 @@ CREATE TABLE IF NOT EXISTS public.questions (
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
--- Safely add missing columns if questions table already existed
 ALTER TABLE public.questions
 ADD COLUMN IF NOT EXISTS options JSONB NOT NULL DEFAULT '[]'::jsonb,
 ADD COLUMN IF NOT EXISTS correct_option_index INTEGER NOT NULL DEFAULT 0,
@@ -182,11 +167,8 @@ ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc':
 
 ALTER TABLE public.questions ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "Anyone authenticated can view questions" ON public.questions;
-DROP POLICY IF EXISTS "Public can view questions without answers" ON public.questions;
-DROP POLICY IF EXISTS "Admins can view all questions, students can view questions after submitting" ON public.questions;
-
-CREATE POLICY "Admins can view all questions, students can view questions after submitting"
+DROP POLICY IF EXISTS "Admins can view all questions, students can view after test submission" ON public.questions;
+CREATE POLICY "Admins can view all questions, students can view after test submission"
 ON public.questions FOR SELECT TO authenticated
 USING (
     public.is_admin()
@@ -198,29 +180,25 @@ USING (
     )
 );
 
-DROP POLICY IF EXISTS "Only admins can modify questions" ON public.questions;
 DROP POLICY IF EXISTS "Only admins can insert questions" ON public.questions;
-DROP POLICY IF EXISTS "Only admins can update questions" ON public.questions;
-DROP POLICY IF EXISTS "Only admins can delete questions" ON public.questions;
-
 CREATE POLICY "Only admins can insert questions"
 ON public.questions FOR INSERT TO authenticated
 WITH CHECK (public.is_admin());
 
+DROP POLICY IF EXISTS "Only admins can update questions" ON public.questions;
 CREATE POLICY "Only admins can update questions"
 ON public.questions FOR UPDATE TO authenticated
 USING (public.is_admin())
 WITH CHECK (public.is_admin());
 
+DROP POLICY IF EXISTS "Only admins can delete questions" ON public.questions;
 CREATE POLICY "Only admins can delete questions"
 ON public.questions FOR DELETE TO authenticated
 USING (public.is_admin());
 
 CREATE INDEX IF NOT EXISTS idx_questions_test_id ON public.questions(test_id);
-CREATE INDEX IF NOT EXISTS idx_questions_test_topic ON public.questions(test_id, topic);
-CREATE INDEX IF NOT EXISTS idx_questions_difficulty ON public.questions(difficulty);
 
--- Safe Student View: strictly omits correct_option_index and solution
+-- Safe View: student_questions (No answers or explanations leaked)
 CREATE OR REPLACE VIEW public.student_questions AS
 SELECT 
     q.id,
@@ -238,7 +216,7 @@ WHERE t.is_published = true;
 GRANT SELECT ON public.student_questions TO authenticated;
 
 -- ----------------------------------------------------------------
--- 5. Attempts Table (Single Attempt per Student per Test & Strikes)
+-- 5. Attempts Table & Security
 -- ----------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.attempts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -246,6 +224,7 @@ CREATE TABLE IF NOT EXISTS public.attempts (
     test_id UUID REFERENCES public.tests(id) ON DELETE CASCADE NOT NULL,
     status TEXT NOT NULL DEFAULT 'in_progress' CHECK (status IN ('in_progress', 'completed')),
     started_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    end_time TIMESTAMPTZ,
     submitted_at TIMESTAMPTZ,
     strikes INTEGER NOT NULL DEFAULT 0,
     result_id UUID,
@@ -253,10 +232,10 @@ CREATE TABLE IF NOT EXISTS public.attempts (
     CONSTRAINT unique_user_test_attempt UNIQUE (user_id, test_id)
 );
 
--- Safely add missing columns if attempts table already existed
 ALTER TABLE public.attempts
 ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'in_progress',
 ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+ADD COLUMN IF NOT EXISTS end_time TIMESTAMPTZ,
 ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMPTZ,
 ADD COLUMN IF NOT EXISTS strikes INTEGER NOT NULL DEFAULT 0,
 ADD COLUMN IF NOT EXISTS result_id UUID,
@@ -275,24 +254,17 @@ END $$;
 
 ALTER TABLE public.attempts ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "Students can view their own attempts" ON public.attempts;
-DROP POLICY IF EXISTS "Admins can view all attempts" ON public.attempts;
 DROP POLICY IF EXISTS "Students can view own attempts, admins can view all" ON public.attempts;
-
 CREATE POLICY "Students can view own attempts, admins can view all"
 ON public.attempts FOR SELECT TO authenticated
 USING (auth.uid() = user_id OR public.is_admin());
 
-DROP POLICY IF EXISTS "Students can insert their own attempts" ON public.attempts;
 DROP POLICY IF EXISTS "Students can insert own attempts, admins can insert any" ON public.attempts;
-
 CREATE POLICY "Students can insert own attempts, admins can insert any"
 ON public.attempts FOR INSERT TO authenticated
 WITH CHECK (auth.uid() = user_id OR public.is_admin());
 
-DROP POLICY IF EXISTS "Students can update their own attempts" ON public.attempts;
 DROP POLICY IF EXISTS "Students can update own attempts, admins can update any" ON public.attempts;
-
 CREATE POLICY "Students can update own attempts, admins can update any"
 ON public.attempts FOR UPDATE TO authenticated
 USING (auth.uid() = user_id OR public.is_admin())
@@ -307,7 +279,51 @@ CREATE INDEX IF NOT EXISTS idx_attempts_user_test ON public.attempts(user_id, te
 CREATE INDEX IF NOT EXISTS idx_attempts_status ON public.attempts(status);
 
 -- ----------------------------------------------------------------
--- 6. Test Results Table
+-- 6. Attempt Answers Table
+-- ----------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.attempt_answers (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    attempt_id UUID REFERENCES public.attempts(id) ON DELETE CASCADE NOT NULL,
+    question_id UUID REFERENCES public.questions(id) ON DELETE CASCADE NOT NULL,
+    selected_option INTEGER,
+    is_reviewed BOOLEAN DEFAULT false,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    CONSTRAINT unique_attempt_question UNIQUE (attempt_id, question_id)
+);
+
+ALTER TABLE public.attempt_answers ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can view own attempt answers" ON public.attempt_answers;
+CREATE POLICY "Users can view own attempt answers"
+ON public.attempt_answers FOR SELECT TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.attempts a
+        WHERE a.id = attempt_answers.attempt_id
+          AND (a.user_id = auth.uid() OR public.is_admin())
+    )
+);
+
+DROP POLICY IF EXISTS "Users can write own attempt answers" ON public.attempt_answers;
+CREATE POLICY "Users can write own attempt answers"
+ON public.attempt_answers FOR ALL TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM public.attempts a
+        WHERE a.id = attempt_answers.attempt_id
+          AND (a.user_id = auth.uid() OR public.is_admin())
+    )
+)
+WITH CHECK (
+    EXISTS (
+        SELECT 1 FROM public.attempts a
+        WHERE a.id = attempt_answers.attempt_id
+          AND (a.user_id = auth.uid() OR public.is_admin())
+    )
+);
+
+-- ----------------------------------------------------------------
+-- 7. Test Results Table & Scoring Lockdown
 -- ----------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.test_results (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -317,10 +333,10 @@ CREATE TABLE IF NOT EXISTS public.test_results (
     total_attempted INTEGER NOT NULL DEFAULT 0,
     total_correct INTEGER NOT NULL DEFAULT 0,
     answers JSONB DEFAULT '{}'::jsonb,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    CONSTRAINT unique_student_test_result UNIQUE (student_id, test_id)
 );
 
--- Safely add missing columns if test_results table already existed
 ALTER TABLE public.test_results
 ADD COLUMN IF NOT EXISTS score INTEGER NOT NULL DEFAULT 0,
 ADD COLUMN IF NOT EXISTS total_attempted INTEGER NOT NULL DEFAULT 0,
@@ -328,22 +344,29 @@ ADD COLUMN IF NOT EXISTS total_correct INTEGER NOT NULL DEFAULT 0,
 ADD COLUMN IF NOT EXISTS answers JSONB DEFAULT '{}'::jsonb,
 ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now());
 
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'unique_student_test_result'
+    ) THEN
+        ALTER TABLE public.test_results ADD CONSTRAINT unique_student_test_result UNIQUE (student_id, test_id);
+    END IF;
+EXCEPTION
+    WHEN OTHERS THEN NULL;
+END $$;
+
 ALTER TABLE public.test_results ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "Students can view their own test results" ON public.test_results;
-DROP POLICY IF EXISTS "Admins can view all test results" ON public.test_results;
 DROP POLICY IF EXISTS "Students can view own test results, admins can view all" ON public.test_results;
-
 CREATE POLICY "Students can view own test results, admins can view all"
 ON public.test_results FOR SELECT TO authenticated
 USING (auth.uid() = student_id OR public.is_admin());
 
-DROP POLICY IF EXISTS "Students can insert their own test results" ON public.test_results;
-DROP POLICY IF EXISTS "Students can insert own test results, admins can insert any" ON public.test_results;
-
-CREATE POLICY "Students can insert own test results, admins can insert any"
+-- Direct student insert revoked: scores can ONLY be inserted by admins or via the grading RPC
+DROP POLICY IF EXISTS "Only admins can insert test results" ON public.test_results;
+CREATE POLICY "Only admins can insert test results"
 ON public.test_results FOR INSERT TO authenticated
-WITH CHECK (auth.uid() = student_id OR public.is_admin());
+WITH CHECK (public.is_admin());
 
 DROP POLICY IF EXISTS "Only admins can update test results" ON public.test_results;
 CREATE POLICY "Only admins can update test results"
@@ -360,7 +383,149 @@ CREATE INDEX IF NOT EXISTS idx_test_results_student_id ON public.test_results(st
 CREATE INDEX IF NOT EXISTS idx_test_results_test_id ON public.test_results(test_id);
 
 -- ----------------------------------------------------------------
--- 7. Atomic Server-Side Grading RPC: grade_and_submit_exam
+-- 8. Analytics Events Table & Security
+-- ----------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.analytics_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    event_type TEXT NOT NULL,
+    metadata JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+ALTER TABLE public.analytics_events ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Authenticated users can insert own analytics events" ON public.analytics_events;
+CREATE POLICY "Authenticated users can insert own analytics events"
+ON public.analytics_events FOR INSERT TO authenticated
+WITH CHECK (auth.uid() = user_id OR user_id IS NULL OR public.is_admin());
+
+DROP POLICY IF EXISTS "Only admins can view analytics events" ON public.analytics_events;
+CREATE POLICY "Only admins can view analytics events"
+ON public.analytics_events FOR SELECT TO authenticated
+USING (public.is_admin());
+
+-- ----------------------------------------------------------------
+-- 9. Atomic Attempt Starter RPC: start_exam_attempt
+-- ----------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.start_exam_attempt(p_test_id UUID)
+RETURNS JSONB AS $$
+DECLARE
+    v_user_id UUID;
+    v_test RECORD;
+    v_attempt RECORD;
+    v_result RECORD;
+    v_now TIMESTAMPTZ := timezone('utc'::text, now());
+    v_end_time TIMESTAMPTZ;
+    v_remaining_seconds INTEGER;
+    v_questions JSONB;
+BEGIN
+    v_user_id := auth.uid();
+    IF v_user_id IS NULL THEN
+        RAISE EXCEPTION 'Authentication required.' USING ERRCODE = '40100';
+    END IF;
+
+    -- Fetch test metadata
+    SELECT * INTO v_test FROM public.tests WHERE id = p_test_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Examination not found.' USING ERRCODE = '40400';
+    END IF;
+
+    IF v_test.is_published = false AND NOT public.is_admin() THEN
+        RAISE EXCEPTION 'This examination is currently a draft.' USING ERRCODE = '40301';
+    END IF;
+
+    -- Check if student has already completed and submitted this test
+    SELECT * INTO v_result FROM public.test_results
+    WHERE student_id = v_user_id AND test_id = p_test_id;
+    IF FOUND THEN
+        RETURN jsonb_build_object(
+            'alreadyCompleted', true,
+            'resultId', v_result.id,
+            'score', v_result.score
+        );
+    END IF;
+
+    -- Check for an existing in-progress attempt
+    SELECT * INTO v_attempt FROM public.attempts
+    WHERE user_id = v_user_id AND test_id = p_test_id;
+
+    IF FOUND THEN
+        IF v_attempt.status = 'completed' AND v_attempt.result_id IS NOT NULL THEN
+            RETURN jsonb_build_object(
+                'alreadyCompleted', true,
+                'resultId', v_attempt.result_id
+            );
+        END IF;
+
+        IF v_attempt.end_time IS NOT NULL THEN
+            v_remaining_seconds := GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (v_attempt.end_time - v_now))))::integer;
+        ELSE
+            v_remaining_seconds := (COALESCE(v_test.duration_minutes, 60) * 60);
+            v_end_time := v_attempt.started_at + (COALESCE(v_test.duration_minutes, 60) || ' minutes')::interval;
+            UPDATE public.attempts SET end_time = v_end_time WHERE id = v_attempt.id;
+        END IF;
+    ELSE
+        v_end_time := v_now + (COALESCE(v_test.duration_minutes, 60) || ' minutes')::interval;
+        v_remaining_seconds := (COALESCE(v_test.duration_minutes, 60) * 60);
+
+        INSERT INTO public.attempts (
+            user_id,
+            test_id,
+            status,
+            started_at,
+            end_time,
+            strikes
+        )
+        VALUES (
+            v_user_id,
+            p_test_id,
+            'in_progress',
+            v_now,
+            v_end_time,
+            0
+        )
+        RETURNING * INTO v_attempt;
+    END IF;
+
+    SELECT COALESCE(
+        jsonb_agg(
+            jsonb_build_object(
+                'id', q.id,
+                'statement', q.statement,
+                'options', q.options,
+                'topic', q.topic,
+                'difficulty', q.difficulty,
+                'image_url', q.image_url
+            ) ORDER BY q.created_at ASC
+        ),
+        '[]'::jsonb
+    ) INTO v_questions
+    FROM public.questions q
+    WHERE q.test_id = p_test_id;
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'test', jsonb_build_object(
+            'id', v_test.id,
+            'title', v_test.title,
+            'duration_minutes', v_test.duration_minutes,
+            'positive_marks', v_test.positive_marks,
+            'negative_marks', v_test.negative_marks
+        ),
+        'questions', v_questions,
+        'remainingSeconds', v_remaining_seconds,
+        'startedAt', v_attempt.started_at,
+        'endTime', v_attempt.end_time,
+        'strikes', COALESCE(v_attempt.strikes, 0)
+    );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+GRANT EXECUTE ON FUNCTION public.start_exam_attempt(UUID) TO authenticated;
+
+-- ----------------------------------------------------------------
+-- 10. Atomic Server-Side Grading RPC: grade_and_submit_exam
 -- ----------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.grade_and_submit_exam(
     p_test_id UUID,
@@ -390,7 +555,7 @@ BEGIN
         RAISE EXCEPTION 'Examination not found.' USING ERRCODE = '40400';
     END IF;
 
-    IF v_test.is_published = false THEN
+    IF v_test.is_published = false AND NOT public.is_admin() THEN
         RAISE EXCEPTION 'This examination is currently a draft and has not been published.' USING ERRCODE = '40301';
     END IF;
 

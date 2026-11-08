@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function POST(req: Request) {
   try {
@@ -28,8 +29,8 @@ export async function POST(req: Request) {
 
     const studentAnswers = answers || {};
 
-    // 1. Attempt atomic server-side grading via Postgres RPC (grade_and_submit_exam)
-    // This executes atomically inside Postgres with SECURITY DEFINER privileges.
+    // 1. Primary: Atomic server-side grading via Postgres RPC (grade_and_submit_exam)
+    // Runs inside Postgres with SECURITY DEFINER privileges.
     try {
       const { data: rpcResult, error: rpcError } = await supabase.rpc(
         "grade_and_submit_exam",
@@ -49,20 +50,45 @@ export async function POST(req: Request) {
         });
       }
 
-      // If the RPC raised a custom validation exception, return it directly
-      if (rpcError && rpcError.message && !rpcError.message.includes("function") && !rpcError.message.includes("does not exist")) {
+      // If the RPC returned a validation error (e.g. already submitted), surface it
+      if (
+        rpcError &&
+        rpcError.message &&
+        !rpcError.message.includes("function") &&
+        !rpcError.message.includes("does not exist")
+      ) {
         return NextResponse.json(
           { error: rpcError.message },
           { status: 403 }
         );
       }
     } catch {
-      // Fall through to standard grading if RPC is not available in current database
+      // Fall through to admin client fallback if RPC is unavailable
     }
 
-    // 2. Fallback: Manual server grading in Next.js
-    // Fetch test marking scheme from live database
-    const { data: testData, error: testError } = await supabase
+    // 2. Fallback: Secure server grading using service-role admin client
+    const adminSupabase = createAdminClient();
+
+    // Check if user already submitted
+    const { data: existingResult } = await adminSupabase
+      .from("test_results")
+      .select("id")
+      .eq("student_id", user.id)
+      .eq("test_id", testId)
+      .maybeSingle();
+
+    if (existingResult) {
+      return NextResponse.json(
+        {
+          error: "You have already completed and submitted this examination.",
+          alreadyCompleted: true,
+          resultId: existingResult.id,
+        },
+        { status: 403 }
+      );
+    }
+
+    const { data: testData, error: testError } = await adminSupabase
       .from("tests")
       .select("id, duration_minutes, positive_marks, negative_marks")
       .eq("id", testId)
@@ -78,8 +104,8 @@ export async function POST(req: Request) {
     const pos = testData.positive_marks ?? 4;
     const neg = testData.negative_marks ?? 1;
 
-    // Fetch correct answers securely from the backend
-    const { data: questions, error: qError } = await supabase
+    // Fetch answer key using service-role client (secure on server)
+    const { data: questions, error: qError } = await adminSupabase
       .from("questions")
       .select("id, correct_option_index")
       .eq("test_id", testId);
@@ -109,7 +135,7 @@ export async function POST(req: Request) {
       }
     });
 
-    // Save scorecard to test_results table
+    const nowIso = new Date().toISOString();
     const insertPayload = {
       test_id: testId,
       student_id: user.id,
@@ -117,9 +143,10 @@ export async function POST(req: Request) {
       total_attempted: attempted,
       total_correct: correct,
       answers: studentAnswers,
+      created_at: nowIso,
     };
 
-    const { data: result, error: insertError } = await supabase
+    const { data: result, error: insertError } = await adminSupabase
       .from("test_results")
       .insert([insertPayload])
       .select("id, score, total_attempted, total_correct")
@@ -132,18 +159,20 @@ export async function POST(req: Request) {
       );
     }
 
-    // Update attempt record if exists
+    // Update attempts record
     try {
-      const nowIso = new Date().toISOString();
-      await supabase
+      await adminSupabase
         .from("attempts")
-        .update({
-          status: "completed",
-          submitted_at: nowIso,
-          result_id: result.id,
-        })
-        .eq("user_id", user.id)
-        .eq("test_id", testId);
+        .upsert(
+          {
+            user_id: user.id,
+            test_id: testId,
+            status: "completed",
+            submitted_at: nowIso,
+            result_id: result.id,
+          },
+          { onConflict: "user_id,test_id" }
+        );
     } catch {
       // attempts table is auxiliary
     }
