@@ -41,20 +41,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // Section B.1: Tests with 0 questions must not be startable
-    const { count: questionCount } = await supabase
-      .from("questions")
-      .select("id", { count: "exact", head: true })
-      .eq("test_id", testId);
-
-    if ((questionCount ?? 0) === 0) {
-      return NextResponse.json(
-        { error: "This examination has 0 questions and cannot be started." },
-        { status: 400 }
-      );
-    }
-
-    // 1. Try atomic server RPC: start_exam_attempt
+    // 1. Try atomic server RPC: start_exam_attempt (SECURITY DEFINER)
     try {
       const { data: rpcData, error: rpcError } = await supabase.rpc(
         "start_exam_attempt",
@@ -74,6 +61,15 @@ export async function POST(req: Request) {
           );
         }
 
+        // Section B.1: Tests with 0 questions must not be startable
+        const rpcQuestions = rpcData.questions || [];
+        if (rpcQuestions.length === 0) {
+          return NextResponse.json(
+            { error: "This examination has 0 questions and cannot be started." },
+            { status: 400 }
+          );
+        }
+
         return NextResponse.json(rpcData);
       }
     } catch {
@@ -81,6 +77,27 @@ export async function POST(req: Request) {
     }
 
     // 2. Fallback path: verify test and manage attempt in public.attempts
+    // Section B.1: Check question count via student_questions or questions
+    const { count: sqCount } = await supabase
+      .from("student_questions")
+      .select("id", { count: "exact", head: true })
+      .eq("test_id", testId);
+
+    const questionCount =
+      sqCount ??
+      (
+        await supabase
+          .from("questions")
+          .select("id", { count: "exact", head: true })
+          .eq("test_id", testId)
+      ).count;
+
+    if ((questionCount ?? 0) === 0) {
+      return NextResponse.json(
+        { error: "This examination has 0 questions and cannot be started." },
+        { status: 400 }
+      );
+    }
     const { data: testData, error: testError } = await supabase
       .from("tests")
       .select("id, title, duration_minutes, positive_marks, negative_marks, is_published, start_time, end_time")

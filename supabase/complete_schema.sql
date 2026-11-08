@@ -168,10 +168,20 @@ ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc':
 ALTER TABLE public.questions ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Admins can view all questions, students can view after test submission" ON public.questions;
-CREATE POLICY "Admins can view all questions, students can view after test submission"
+DROP POLICY IF EXISTS "Admins can view all questions, students can view questions after submitting" ON public.questions;
+DROP POLICY IF EXISTS "Anyone authenticated can view questions for published tests" ON public.questions;
+DROP POLICY IF EXISTS "Students can view questions for published tests, admins can view all" ON public.questions;
+
+CREATE POLICY "Students can view questions for published tests, admins can view all"
 ON public.questions FOR SELECT TO authenticated
 USING (
     public.is_admin()
+    OR
+    EXISTS (
+        SELECT 1 FROM public.tests t
+        WHERE t.id = questions.test_id
+          AND t.is_published = true
+    )
     OR
     EXISTS (
         SELECT 1 FROM public.test_results tr

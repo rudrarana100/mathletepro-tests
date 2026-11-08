@@ -41,19 +41,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // Section B.1: Tests with 0 questions must not be submitted
-    const { count: questionCount } = await supabase
-      .from("questions")
-      .select("id", { count: "exact", head: true })
-      .eq("test_id", testId);
-
-    if ((questionCount ?? 0) === 0) {
-      return NextResponse.json(
-        { error: "Examination has 0 questions and cannot be evaluated." },
-        { status: 400 }
-      );
-    }
-
     const studentAnswers = answers || {};
 
     // 1. Primary: Atomic server-side grading via Postgres RPC (grade_and_submit_exam)
