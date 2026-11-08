@@ -30,7 +30,6 @@ interface AdminSidebarProps {
 export default function AdminSidebar({
   children,
   userEmail: initialUserEmail,
-  role: _initialRole,
 }: AdminSidebarProps) {
   const router = useRouter();
   const pathname = usePathname();
