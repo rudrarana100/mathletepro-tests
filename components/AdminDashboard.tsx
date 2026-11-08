@@ -2984,16 +2984,20 @@ export default function AdminDashboard({
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 pt-2">
-                <label className="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
+              <div className="flex flex-col gap-1 pt-2">
+                <label className={`flex items-center gap-2 text-xs ${(editingTest?.questions?.length ?? 0) === 0 ? "text-zinc-500 cursor-not-allowed" : "text-zinc-300 cursor-pointer"}`}>
                   <input
                     type="checkbox"
-                    checked={editIsPublished}
+                    disabled={(editingTest?.questions?.length ?? 0) === 0}
+                    checked={(editingTest?.questions?.length ?? 0) === 0 ? false : editIsPublished}
                     onChange={(e) => setEditIsPublished(e.target.checked)}
-                    className="rounded border-zinc-700 bg-black text-white focus:ring-0"
+                    className="rounded border-zinc-700 bg-black text-white focus:ring-0 disabled:opacity-50"
                   />
                   <span>Published (visible to students)</span>
                 </label>
+                {(editingTest?.questions?.length ?? 0) === 0 && (
+                  <p className="text-[11px] text-amber-500/80">Add at least one question before publishing</p>
+                )}
               </div>
 
               <div className="flex justify-end gap-2 pt-4 border-t border-zinc-900">
@@ -3099,7 +3103,7 @@ export default function AdminDashboard({
                           <span>Attempted: <span className="tabular-nums">{res.total_attempted}</span></span>
                           <span>Correct: <strong className="text-emerald-400 tabular-nums">{res.total_correct}</strong></span>
                           <span className="text-zinc-500">
-                            {new Date(res.created_at).toLocaleDateString()}
+                            {formatDate(res.created_at)}
                           </span>
                         </div>
                       </div>
