@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import CommandMenu from "@/components/CommandMenu";
@@ -17,15 +18,24 @@ import {
   Menu,
   X,
   Search,
-  ExternalLink,
 } from "lucide-react";
 
-export default function AdminSidebar({ children }: { children: React.ReactNode }) {
+interface AdminSidebarProps {
+  children: React.ReactNode;
+  userEmail?: string;
+  role?: string;
+}
+
+export default function AdminSidebar({
+  children,
+  userEmail: initialUserEmail,
+  role: initialRole,
+}: AdminSidebarProps) {
   const router = useRouter();
   const pathname = usePathname();
   const supabase = createClient();
 
-  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userEmail] = useState<string | null>(initialUserEmail ?? "faculty@mathletepro.com");
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [isCommandOpen, setIsCommandOpen] = useState(false);
@@ -35,22 +45,7 @@ export default function AdminSidebar({ children }: { children: React.ReactNode }
     if (savedCollapsed !== null) {
       setIsCollapsed(savedCollapsed === "true");
     }
-
-    const getUserData = async () => {
-      try {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-
-        if (user) {
-          setUserEmail(user.email ?? "Admin");
-        }
-      } catch {
-        setUserEmail("faculty@mathletepro.com");
-      }
-    };
-    getUserData();
-  }, [supabase]);
+  }, []);
 
   // Global Cmd+K keyboard shortcut
   useEffect(() => {
@@ -80,13 +75,14 @@ export default function AdminSidebar({ children }: { children: React.ReactNode }
     router.refresh();
   };
 
+  // Plain wording per Section C.2: "Faculty console" -> "Dashboard"
+  // Section B.2: Remove "Take exam" from admin sidebar
   const navItems = [
     { label: "Overview", href: "/admin", icon: Shield },
     { label: "Tests", href: "/admin/tests", icon: Layers },
     { label: "Questions", href: "/admin/questions", icon: HelpCircle },
     { label: "Students", href: "/admin/students", icon: Users },
     { label: "Analytics", href: "/admin/analytics", icon: TrendingUp },
-    { label: "Take exam", href: "/student/tests", icon: ExternalLink },
   ];
 
   return (
@@ -138,7 +134,7 @@ export default function AdminSidebar({ children }: { children: React.ReactNode }
                     Mathlete Pro
                   </div>
                   <div className="text-xs text-zinc-500 font-normal">
-                    Faculty control console
+                    Dashboard
                   </div>
                 </div>
                 <button
@@ -149,7 +145,7 @@ export default function AdminSidebar({ children }: { children: React.ReactNode }
                 </button>
               </div>
 
-              {/* Mobile Navigation */}
+              {/* Mobile Navigation with next/link prefetching */}
               <nav className="space-y-1">
                 {navItems.map((item) => {
                   const Icon = item.icon;
@@ -158,12 +154,11 @@ export default function AdminSidebar({ children }: { children: React.ReactNode }
                       ? pathname === "/admin" || pathname === "/admin/overview"
                       : pathname.startsWith(item.href);
                   return (
-                    <button
+                    <Link
                       key={item.label}
-                      onClick={() => {
-                        setIsMobileOpen(false);
-                        router.push(item.href);
-                      }}
+                      href={item.href}
+                      prefetch={true}
+                      onClick={() => setIsMobileOpen(false)}
                       className={`w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-md transition-colors text-left ${
                         isActive
                           ? "bg-zinc-800 text-zinc-100"
@@ -172,7 +167,7 @@ export default function AdminSidebar({ children }: { children: React.ReactNode }
                     >
                       <Icon className="w-4 h-4 shrink-0" />
                       <span>{item.label}</span>
-                    </button>
+                    </Link>
                   );
                 })}
               </nav>
@@ -223,7 +218,7 @@ export default function AdminSidebar({ children }: { children: React.ReactNode }
                     Mathlete Pro
                   </div>
                   <div className="text-xs text-zinc-500 font-normal">
-                    Faculty console
+                    Dashboard
                   </div>
                 </div>
               </div>
@@ -256,7 +251,7 @@ export default function AdminSidebar({ children }: { children: React.ReactNode }
             )}
           </button>
 
-          {/* Nav Items */}
+          {/* Nav Items with next/link prefetching */}
           <nav className="space-y-1">
             {!isCollapsed && (
               <div className="text-xs text-zinc-500 font-normal px-3 py-1">
@@ -270,9 +265,10 @@ export default function AdminSidebar({ children }: { children: React.ReactNode }
                   ? pathname === "/admin" || pathname === "/admin/overview"
                   : pathname.startsWith(item.href);
               return (
-                <button
+                <Link
                   key={item.label}
-                  onClick={() => router.push(item.href)}
+                  href={item.href}
+                  prefetch={true}
                   title={isCollapsed ? item.label : undefined}
                   className={`w-full flex items-center gap-3 rounded-md transition-colors ${
                     isCollapsed ? "p-2.5 justify-center" : "px-3 py-2 text-sm font-medium text-left"
@@ -284,7 +280,7 @@ export default function AdminSidebar({ children }: { children: React.ReactNode }
                 >
                   <Icon className="w-4 h-4 shrink-0" />
                   {!isCollapsed && <span className="truncate">{item.label}</span>}
-                </button>
+                </Link>
               );
             })}
           </nav>

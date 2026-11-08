@@ -3,8 +3,12 @@ import { requireAdmin } from "@/lib/auth/guards";
 import AdminSidebar from "@/components/AdminSidebar";
 
 async function AdminGuard({ children }: { children: React.ReactNode }) {
-  await requireAdmin();
-  return <AdminSidebar>{children}</AdminSidebar>;
+  const session = await requireAdmin();
+  return (
+    <AdminSidebar userEmail={session.user.email} role={session.profile.role}>
+      {children}
+    </AdminSidebar>
+  );
 }
 
 export default function AdminLayout({
@@ -16,7 +20,7 @@ export default function AdminLayout({
     <Suspense
       fallback={
         <div className="flex h-screen items-center justify-center bg-black text-zinc-400 text-sm font-normal">
-          Verifying faculty credentials...
+          Loading faculty console...
         </div>
       }
     >

@@ -37,15 +37,15 @@ export async function updateSession(request: NextRequest) {
     },
   );
 
-  // Attempt Supabase session validation
-  let user = null;
+  // Fast session check in middleware (reads/refreshes cookies locally in ~1ms without remote roundtrip)
+  let hasSession = false;
   try {
-    const { data, error } = await supabase.auth.getUser();
-    if (!error && data?.user) {
-      user = data.user;
+    const { data, error } = await supabase.auth.getSession();
+    if (!error && data?.session?.user) {
+      hasSession = true;
     }
   } catch {
-    user = null;
+    hasSession = false;
   }
 
   const pathname = request.nextUrl.pathname;
@@ -57,7 +57,6 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-
   // Exempt public paths, auth pages, and static assets from auth redirect
   const isPublicPath =
     pathname === "/" ||
@@ -67,7 +66,7 @@ export async function updateSession(request: NextRequest) {
     pathname.startsWith("/_next") ||
     pathname.includes(".");
 
-  if (!isPublicPath && !user) {
+  if (!isPublicPath && !hasSession) {
     const url = request.nextUrl.clone();
     url.pathname = "/auth/login";
     return NextResponse.redirect(url);

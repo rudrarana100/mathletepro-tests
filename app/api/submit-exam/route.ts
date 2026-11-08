@@ -27,6 +27,33 @@ export async function POST(req: Request) {
       );
     }
 
+    // Section B.2: Admins must never be able to submit an exam
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (profile?.role === "admin") {
+      return NextResponse.json(
+        { error: "Faculty accounts cannot take or submit examinations." },
+        { status: 403 }
+      );
+    }
+
+    // Section B.1: Tests with 0 questions must not be submitted
+    const { count: questionCount } = await supabase
+      .from("questions")
+      .select("id", { count: "exact", head: true })
+      .eq("test_id", testId);
+
+    if ((questionCount ?? 0) === 0) {
+      return NextResponse.json(
+        { error: "Examination has 0 questions and cannot be evaluated." },
+        { status: 400 }
+      );
+    }
+
     const studentAnswers = answers || {};
 
     // 1. Primary: Atomic server-side grading via Postgres RPC (grade_and_submit_exam)

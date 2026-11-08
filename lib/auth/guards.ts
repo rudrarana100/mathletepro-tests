@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
@@ -18,11 +19,10 @@ export interface AuthSession {
 }
 
 /**
- * Asserts a valid authenticated Supabase session.
- * If not authenticated, immediately redirects to /auth/login.
- * Returns the authenticated user and their profile.
+ * Asserts and reads session + role exactly ONCE per request lifecycle.
+ * React cache() de-duplicates calls across layout, pages, and server components.
  */
-export async function requireUser(): Promise<AuthSession> {
+export const getCachedSession = cache(async (): Promise<AuthSession | null> => {
   const supabase = await createClient();
   const {
     data: { user },
@@ -30,7 +30,7 @@ export async function requireUser(): Promise<AuthSession> {
   } = await supabase.auth.getUser();
 
   if (userError || !user || !user.email) {
-    redirect("/auth/login");
+    return null;
   }
 
   const { data: profile } = await supabase
@@ -49,6 +49,19 @@ export async function requireUser(): Promise<AuthSession> {
       created_at: profile?.created_at,
     },
   };
+});
+
+/**
+ * Asserts a valid authenticated Supabase session.
+ * If not authenticated, immediately redirects to /auth/login.
+ * Returns the authenticated user and their profile.
+ */
+export async function requireUser(): Promise<AuthSession> {
+  const session = await getCachedSession();
+  if (!session) {
+    redirect("/auth/login");
+  }
+  return session;
 }
 
 /**
@@ -67,9 +80,15 @@ export async function requireAdmin(): Promise<AuthSession> {
 }
 
 /**
- * Asserts an authenticated session for taking exams.
- * Both students and faculty are permitted to take exams.
+ * Asserts an authenticated student session for taking exams.
+ * Admins are blocked from taking student exams.
  */
 export async function requireStudent(): Promise<AuthSession> {
-  return requireUser();
+  const session = await requireUser();
+
+  if (session.profile.role === "admin") {
+    redirect("/admin");
+  }
+
+  return session;
 }

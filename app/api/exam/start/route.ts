@@ -27,6 +27,33 @@ export async function POST(req: Request) {
       );
     }
 
+    // Section B.2: Admins must never be able to start or submit an exam
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (profile?.role === "admin") {
+      return NextResponse.json(
+        { error: "Faculty accounts cannot take or start examinations." },
+        { status: 403 }
+      );
+    }
+
+    // Section B.1: Tests with 0 questions must not be startable
+    const { count: questionCount } = await supabase
+      .from("questions")
+      .select("id", { count: "exact", head: true })
+      .eq("test_id", testId);
+
+    if ((questionCount ?? 0) === 0) {
+      return NextResponse.json(
+        { error: "This examination has 0 questions and cannot be started." },
+        { status: 400 }
+      );
+    }
+
     // 1. Try atomic server RPC: start_exam_attempt
     try {
       const { data: rpcData, error: rpcError } = await supabase.rpc(

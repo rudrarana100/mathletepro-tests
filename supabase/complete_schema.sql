@@ -635,3 +635,47 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 GRANT EXECUTE ON FUNCTION public.grade_and_submit_exam(UUID, JSONB) TO authenticated;
+
+-- ----------------------------------------------------------------
+-- 10. Performance Indexes & Analytical SQL Functions
+-- ----------------------------------------------------------------
+CREATE INDEX IF NOT EXISTS idx_attempts_user_id ON public.attempts(user_id);
+CREATE INDEX IF NOT EXISTS idx_attempts_test_id ON public.attempts(test_id);
+CREATE INDEX IF NOT EXISTS idx_test_results_student_id ON public.test_results(student_id);
+CREATE INDEX IF NOT EXISTS idx_test_results_test_id ON public.test_results(test_id);
+CREATE INDEX IF NOT EXISTS idx_test_results_test_score ON public.test_results(test_id, score DESC);
+CREATE INDEX IF NOT EXISTS idx_questions_test_id ON public.questions(test_id);
+CREATE INDEX IF NOT EXISTS idx_tests_is_published ON public.tests(is_published);
+
+CREATE OR REPLACE FUNCTION public.get_admin_dashboard_stats()
+RETURNS TABLE (
+    total_students BIGINT,
+    total_tests BIGINT,
+    published_tests BIGINT,
+    draft_tests BIGINT,
+    total_questions BIGINT,
+    total_student_attempts BIGINT,
+    average_student_score NUMERIC
+) AS $$
+BEGIN
+    RETURN QUERY
+    WITH student_users AS (
+        SELECT id FROM public.profiles WHERE role != 'admin'
+    ),
+    valid_results AS (
+        SELECT tr.score FROM public.test_results tr
+        JOIN student_users su ON tr.student_id = su.id
+    )
+    SELECT
+        (SELECT COUNT(*) FROM student_users)::BIGINT AS total_students,
+        (SELECT COUNT(*) FROM public.tests)::BIGINT AS total_tests,
+        (SELECT COUNT(*) FROM public.tests WHERE is_published = true)::BIGINT AS published_tests,
+        (SELECT COUNT(*) FROM public.tests WHERE is_published = false)::BIGINT AS draft_tests,
+        (SELECT COUNT(*) FROM public.questions)::BIGINT AS total_questions,
+        (SELECT COUNT(*) FROM valid_results)::BIGINT AS total_student_attempts,
+        COALESCE((SELECT ROUND(AVG(score), 1) FROM valid_results), 0)::NUMERIC AS average_student_score;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+GRANT EXECUTE ON FUNCTION public.get_admin_dashboard_stats() TO authenticated;
+

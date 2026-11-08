@@ -10,7 +10,6 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import PageHeader from "@/components/PageHeader";
 import { useToast } from "@/components/Toast";
 import MathRenderer from "@/components/MathRenderer";
-import * as XLSX from "xlsx";
 import {
   Shield,
   Layers,
@@ -203,8 +202,20 @@ export default function AdminDashboard({
   const [analyticsQuestions, setAnalyticsQuestions] = useState<Question[]>([]);
   const [isAnalyticsQuestionsLoading, setIsAnalyticsQuestionsLoading] = useState(false);
 
+  // Section C.3: Format dates as "7 Nov 2026"
+  const formatDate = useCallback((dateStr?: string | null) => {
+    if (!dateStr) return "—";
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return "—";
+    return d.toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+  }, []);
+
   // ================================================================
-  // Data Fetching
+  // Data Fetching (Parallel Promise.all)
   // ================================================================
 
   const fetchAdminData = useCallback(async () => {
@@ -214,34 +225,29 @@ export default function AdminDashboard({
       let loadedResults: TestResultRecord[] = [];
 
       try {
-        // 1. Fetch Tests with question counts
-        const { data: testData, error: testError } = await supabase
-          .from("tests")
-          .select("id, title, duration_minutes, positive_marks, negative_marks, is_published, start_time, end_time, created_at, questions(id)")
-          .order("created_at", { ascending: false });
+        const [testRes, resultsRes, profileRes] = await Promise.all([
+          supabase
+            .from("tests")
+            .select("id, title, duration_minutes, positive_marks, negative_marks, is_published, start_time, end_time, created_at, questions(id)")
+            .order("created_at", { ascending: false }),
+          supabase
+            .from("test_results")
+            .select("id, student_id, test_id, score, total_attempted, total_correct, answers, created_at, tests(title)")
+            .order("created_at", { ascending: false }),
+          supabase
+            .from("profiles")
+            .select("id, email, role, full_name, created_at")
+            .order("created_at", { ascending: false }),
+        ]);
 
-        if (!testError && testData && testData.length > 0) {
-          loadedTests = testData as unknown as Test[];
+        if (!testRes.error && testRes.data) {
+          loadedTests = testRes.data as unknown as Test[];
         }
-
-        // 2. Fetch All Student Results for Analytics & Recent Attempts
-        const { data: resultsData, error: resultsError } = await supabase
-          .from("test_results")
-          .select("id, student_id, test_id, score, total_attempted, total_correct, answers, created_at, tests(title)")
-          .order("created_at", { ascending: false });
-
-        if (!resultsError && resultsData && resultsData.length > 0) {
-          loadedResults = resultsData as unknown as TestResultRecord[];
+        if (!resultsRes.error && resultsRes.data) {
+          loadedResults = resultsRes.data as unknown as TestResultRecord[];
         }
-
-        // 3. Fetch Registered Profiles
-        const { data: profileData } = await supabase
-          .from("profiles")
-          .select("id, email, role, full_name, created_at")
-          .order("created_at", { ascending: false });
-
-        if (profileData && profileData.length > 0) {
-          setStudents(profileData as StudentProfile[]);
+        if (!profileRes.error && profileRes.data) {
+          setStudents(profileRes.data as StudentProfile[]);
         }
       } catch {
         // Fallback if offline
@@ -404,7 +410,15 @@ export default function AdminDashboard({
   };
 
   const handleTogglePublish = async (test: Test) => {
+    const qCount = test.questions?.length ?? 0;
     const nextState = !(test.is_published ?? true);
+
+    // Section B.1: Tests with 0 questions must not be publishable
+    if (nextState === true && qCount === 0) {
+      toastError("Cannot publish a test with 0 questions. Add at least one question first.");
+      return;
+    }
+
     setTests((prev) =>
       prev.map((t) => (t.id === test.id ? { ...t, is_published: nextState } : t))
     );
@@ -436,6 +450,12 @@ export default function AdminDashboard({
   const handleSaveEditTest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingTest) return;
+
+    const qCount = editingTest.questions?.length ?? 0;
+    if (editIsPublished && qCount === 0) {
+      toastError("Cannot publish a test with 0 questions. Add at least one question first.");
+      return;
+    }
 
     try {
       const { error } = await supabase
@@ -693,6 +713,7 @@ export default function AdminDashboard({
       },
     ];
 
+    const XLSX = await import("xlsx");
     const worksheet = XLSX.utils.json_to_sheet(templateData);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Mathlete_Questions");
@@ -705,8 +726,9 @@ export default function AdminDashboard({
 
     setBulkSummary(null);
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       try {
+        const XLSX = await import("xlsx");
         const data = new Uint8Array(event.target?.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: "array" });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -840,10 +862,16 @@ export default function AdminDashboard({
   // Analytics & CSV Export
   // ================================================================
 
+  // Section B.2: Exclude admin accounts from all student analytics
+  const studentResults = useMemo(() => {
+    const adminIds = new Set(students.filter((s) => s.role === "admin").map((s) => s.id));
+    return allResults.filter((r) => !adminIds.has(r.student_id));
+  }, [allResults, students]);
+
   const filteredResults = useMemo(() => {
-    if (analyticsTestFilter === "all") return allResults;
-    return allResults.filter((r) => r.test_id === analyticsTestFilter);
-  }, [allResults, analyticsTestFilter]);
+    if (analyticsTestFilter === "all") return studentResults;
+    return studentResults.filter((r) => r.test_id === analyticsTestFilter);
+  }, [studentResults, analyticsTestFilter]);
 
   const analyticsStats = useMemo(() => {
     const total = filteredResults.length;
@@ -878,13 +906,13 @@ export default function AdminDashboard({
     return buckets;
   }, [filteredResults, analyticsStats.max]);
 
-  // Per-Question Miss Rate Breakdown for Scoped Test
+  // Per-Question Miss Rate Breakdown for Scoped Test (excluding admin attempts)
   const questionAnalyticsList = useMemo<QuestionAnalytics[]>(() => {
     if (analyticsTestFilter === "all" || analyticsQuestions.length === 0) {
       return [];
     }
 
-    const testSubmissions = allResults.filter((r) => r.test_id === analyticsTestFilter);
+    const testSubmissions = studentResults.filter((r) => r.test_id === analyticsTestFilter);
     const totalSubs = testSubmissions.length;
 
     return analyticsQuestions.map((q) => {
@@ -923,7 +951,7 @@ export default function AdminDashboard({
         difficultyIndicator,
       };
     }).sort((a, b) => b.missRate - a.missRate);
-  }, [analyticsTestFilter, analyticsQuestions, allResults]);
+  }, [analyticsTestFilter, analyticsQuestions, studentResults]);
 
   const mostMissedQuestion = useMemo(() => {
     if (questionAnalyticsList.length === 0 || questionAnalyticsList[0].totalSubmissions === 0) {
@@ -971,13 +999,14 @@ export default function AdminDashboard({
 
   const aggregatedStudents = useMemo(() => {
     const studentResultsMap = new Map<string, TestResultRecord[]>();
-    allResults.forEach((r) => {
+    studentResults.forEach((r) => {
       const arr = studentResultsMap.get(r.student_id) || [];
       arr.push(r);
       studentResultsMap.set(r.student_id, arr);
     });
 
-    const list = students.map((s) => {
+    // Section B.2: Exclude admin accounts from student analytics & roster
+    const list = students.filter((s) => s.role !== "admin").map((s) => {
       const results = studentResultsMap.get(s.id) || [];
       const totalAttempts = results.length;
       const avgScore =
@@ -1053,58 +1082,14 @@ export default function AdminDashboard({
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-16">
-      {/* Header */}
+      {/* Header (Section C.1 & C.2) */}
       <PageHeader
-        title="Faculty console"
-        description="Test series architecture, question bank studio, and performance analytics"
+        title="Dashboard"
         breadcrumbs={[
           { label: "Mathlete", href: "/admin" },
-          { label: "Faculty console" },
+          { label: "Dashboard" },
         ]}
-        action={
-          <Button
-            onClick={fetchAdminData}
-            variant="outline"
-            size="sm"
-            className="rounded-md border-zinc-800 bg-zinc-950 text-zinc-300 hover:bg-zinc-900 text-xs font-medium flex items-center gap-2"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>Sync data</span>
-          </Button>
-        }
       />
-
-      {/* Top Navigation Tabs */}
-      <div className="flex items-center gap-1 border-b border-zinc-800 overflow-x-auto pb-1">
-        {[
-          { id: "overview", label: "Overview", icon: Shield },
-          { id: "tests", label: "Test series", icon: Layers },
-          { id: "questions", label: "Question studio", icon: HelpCircle },
-          { id: "bulk", label: "Excel bulk studio", icon: FileSpreadsheet },
-          { id: "students", label: "Student directory", icon: Users },
-          { id: "analytics", label: "Analytics & export", icon: TrendingUp },
-        ].map((tab) => {
-          const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => {
-                setActiveTab(tab.id as typeof activeTab);
-                window.location.hash = tab.id;
-              }}
-              className={`flex items-center gap-2 px-3.5 py-2 text-xs font-medium transition-all rounded-md whitespace-nowrap ${
-                isActive
-                  ? "bg-zinc-900 text-zinc-100 border border-zinc-800"
-                  : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-950"
-              }`}
-            >
-              <Icon className="w-3.5 h-3.5" />
-              <span>{tab.label}</span>
-            </button>
-          );
-        })}
-      </div>
 
       {/* ============================================================ */}
       {/* TAB 0: OVERVIEW */}
@@ -1118,7 +1103,7 @@ export default function AdminDashboard({
                 Total students
               </span>
               <span className="text-2xl font-semibold text-zinc-100 mt-1 block tabular-nums">
-                {students.length}
+                {students.filter((s) => s.role !== "admin").length}
               </span>
               <span className="text-xs text-zinc-500 mt-1 block">
                 Registered student accounts
@@ -1147,10 +1132,10 @@ export default function AdminDashboard({
                 Total attempts
               </span>
               <span className="text-2xl font-semibold text-zinc-100 mt-1 block tabular-nums">
-                {allResults.length}
+                {studentResults.length}
               </span>
               <span className="text-xs text-zinc-500 mt-1 block">
-                Lifetime test submissions
+                Total attempts
               </span>
             </Card>
 
@@ -1167,7 +1152,7 @@ export default function AdminDashboard({
                 </span>
               </div>
               <span className="text-xs text-zinc-500 mt-1 block">
-                Platform-wide performance
+                All students
               </span>
             </Card>
           </div>
@@ -1233,9 +1218,9 @@ export default function AdminDashboard({
             <Card className="lg:col-span-7 bg-zinc-950 border-zinc-800 rounded-md shadow-none">
               <CardHeader className="border-b border-zinc-900 pb-3 flex flex-row items-center justify-between">
                 <div>
-                  <CardTitle className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
+                  <CardTitle className="text-sm font-medium text-zinc-100 flex items-center gap-2">
                     <Layers className="w-4 h-4 text-zinc-400" />
-                    <span>Configured tests ({tests.length})</span>
+                    <span>Tests ({tests.length})</span>
                   </CardTitle>
                   <CardDescription className="text-xs text-zinc-500">
                     Overview of active examinations and draft assessments.
@@ -1325,12 +1310,12 @@ export default function AdminDashboard({
             <Card className="lg:col-span-5 bg-zinc-950 border-zinc-800 rounded-md shadow-none">
               <CardHeader className="border-b border-zinc-900 pb-3 flex flex-row items-center justify-between">
                 <div>
-                  <CardTitle className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
+                  <CardTitle className="text-sm font-medium text-zinc-100 flex items-center gap-2">
                     <TrendingUp className="w-4 h-4 text-zinc-400" />
                     <span>Recent attempts</span>
                   </CardTitle>
                   <CardDescription className="text-xs text-zinc-500">
-                    Latest completed submissions by enrolled students.
+                    Latest submissions
                   </CardDescription>
                 </div>
                 <Button
@@ -1348,12 +1333,12 @@ export default function AdminDashboard({
               </CardHeader>
               <CardContent className="p-0">
                 <div className="divide-y divide-zinc-900 max-h-[380px] overflow-y-auto">
-                  {allResults.length === 0 ? (
+                  {studentResults.length === 0 ? (
                     <p className="p-6 text-center text-zinc-500 text-xs">
                       No submissions recorded yet.
                     </p>
                   ) : (
-                    allResults.slice(0, 10).map((r) => {
+                    studentResults.slice(0, 10).map((r) => {
                       const studentEmail = studentMap.get(r.student_id) || `${r.student_id.slice(0, 8)}...`;
                       return (
                         <div
@@ -1365,7 +1350,7 @@ export default function AdminDashboard({
                               {r.tests?.title || "Examination"}
                             </p>
                             <p className="text-zinc-500 text-[11px] truncate" title={studentEmail}>
-                              {studentEmail} &middot; {new Date(r.created_at).toLocaleDateString()}
+                              {studentEmail} &middot; {formatDate(r.created_at)}
                             </p>
                           </div>
                           <div className="text-right shrink-0">
