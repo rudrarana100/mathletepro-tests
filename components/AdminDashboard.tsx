@@ -685,7 +685,7 @@ export default function AdminDashboard({
   // Excel Template & Bulk Upload Studio
   // ================================================================
 
-  const handleDownloadTemplate = () => {
+  const handleDownloadTemplate = async () => {
     const templateData = [
       {
         Question: "Evaluate $\\lim_{x \\to 0} \\frac{e^{x^2} - 1 - x^2}{x^4}$",

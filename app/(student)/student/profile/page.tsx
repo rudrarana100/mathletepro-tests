@@ -15,12 +15,16 @@ export default async function StudentProfilePage() {
     .select("score, tests(positive_marks, questions(id))")
     .eq("student_id", user.id);
 
-  const rawResults = results ?? [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rawResults: any[] = results ?? [];
   const count = rawResults.length;
-  const totalScore = rawResults.reduce((acc, r) => acc + (r.score || 0), 0);
-  const totalMaxMarks = rawResults.reduce((acc, r: { tests?: { positive_marks?: number; questions?: Array<{ id: string }> } | null }) => {
-    const qCount = r.tests?.questions?.length ?? 0;
-    const pos = r.tests?.positive_marks ?? 4;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const totalScore: number = rawResults.reduce((acc: number, r: any) => acc + (r.score || 0), 0);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const totalMaxMarks: number = rawResults.reduce((acc: number, r: any) => {
+    const testObj = Array.isArray(r.tests) ? r.tests[0] : r.tests;
+    const qCount = testObj?.questions?.length ?? 0;
+    const pos = testObj?.positive_marks ?? 4;
     return acc + (qCount * pos);
   }, 0);
 
