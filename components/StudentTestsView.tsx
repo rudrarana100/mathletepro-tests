@@ -153,10 +153,10 @@ export default function StudentTestsView({
               {test.title}
             </h3>
 
-            {/* Status Badges in Sentence Case per Section D.4 */}
+            {/* Status Badges in Sentence Case per Section D.2: "Available" (green), "Completed" (gray) */}
             {existingResult ? (
-              <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 border border-emerald-500/40 bg-emerald-500/10 text-emerald-400 rounded shrink-0">
-                <CheckCircle2 className="w-3 h-3" />
+              <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 border border-zinc-700 bg-zinc-900 text-zinc-400 rounded shrink-0">
+                <CheckCircle2 className="w-3 h-3 text-zinc-500" />
                 <span>Completed</span>
               </span>
             ) : isInProgress ? (
@@ -174,7 +174,7 @@ export default function StudentTestsView({
                 Closed
               </span>
             ) : (
-              <span className="inline-flex items-center text-[11px] font-medium px-2 py-0.5 border border-zinc-700 bg-zinc-900 text-zinc-300 rounded shrink-0">
+              <span className="inline-flex items-center text-[11px] font-medium px-2 py-0.5 border border-emerald-500/40 bg-emerald-500/10 text-emerald-400 rounded shrink-0">
                 Available
               </span>
             )}
