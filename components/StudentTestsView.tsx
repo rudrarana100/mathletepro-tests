@@ -67,17 +67,19 @@ export default function StudentTestsView({
   // Check localStorage for any local in-progress test sessions
   useEffect(() => {
     try {
-      const draftIds: string[] = [...inProgressIds];
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith("mathlete_exam_") && !key.endsWith("_submitted")) {
-          const testId = key.replace("mathlete_exam_", "");
-          if (!draftIds.includes(testId)) {
-            draftIds.push(testId);
+      setInProgressIds((prev) => {
+        const draftIds = [...prev];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith("mathlete_exam_") && !key.endsWith("_submitted")) {
+            const testId = key.replace("mathlete_exam_", "");
+            if (!draftIds.includes(testId)) {
+              draftIds.push(testId);
+            }
           }
         }
-      }
-      setInProgressIds(draftIds);
+        return draftIds;
+      });
     } catch {
       // localStorage may be disabled
     }
