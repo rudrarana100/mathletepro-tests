@@ -269,19 +269,28 @@ export default function StudentResultsView({
                     </div>
                   </th>
                   <th
-                    className="py-3 px-4 cursor-pointer hover:text-zinc-200 font-medium"
+                    className="py-3 px-4 cursor-pointer hover:text-zinc-200 font-medium text-right"
                     onClick={() => handleSort("score")}
                   >
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center justify-end gap-1.5">
                       <span>Score</span>
                       <ArrowUpDown className="w-3 h-3 text-zinc-600" />
                     </div>
                   </th>
                   <th
-                    className="py-3 px-4 cursor-pointer hover:text-zinc-200 font-medium"
+                    className="py-3 px-4 cursor-pointer hover:text-zinc-200 font-medium text-right"
+                    onClick={() => handleSort("rank")}
+                  >
+                    <div className="flex items-center justify-end gap-1.5">
+                      <span>Rank</span>
+                      <ArrowUpDown className="w-3 h-3 text-zinc-600" />
+                    </div>
+                  </th>
+                  <th
+                    className="py-3 px-4 cursor-pointer hover:text-zinc-200 font-medium text-right"
                     onClick={() => handleSort("accuracy")}
                   >
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center justify-end gap-1.5">
                       <span>Accuracy</span>
                       <ArrowUpDown className="w-3 h-3 text-zinc-600" />
                     </div>
@@ -315,10 +324,13 @@ export default function StudentResultsView({
                       <td className="py-3.5 px-4 font-medium text-zinc-100">
                         {item.tests?.title || "Exam"}
                       </td>
-                      <td className="py-3.5 px-4 tabular-nums font-semibold text-emerald-400">
+                      <td className="py-3.5 px-4 tabular-nums text-right font-medium text-emerald-400">
                         {formatScoreWithMax(item.score, testMax)}
                       </td>
-                      <td className="py-3.5 px-4 tabular-nums text-zinc-300">
+                      <td className="py-3.5 px-4 tabular-nums text-right text-zinc-300 font-medium">
+                        #{item.rank ?? 1} of {item.totalCohort ?? 1}
+                      </td>
+                      <td className="py-3.5 px-4 tabular-nums text-right text-zinc-300">
                         <span className="text-zinc-100">{accuracy}%</span>
                         <span className="text-xs text-zinc-500 ml-1.5">
                           ({item.total_correct}/{item.total_attempted})
