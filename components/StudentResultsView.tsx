@@ -200,6 +200,9 @@ export default function StudentResultsView({
       } else if (sortField === "accuracy") {
         valA = a.total_attempted > 0 ? a.total_correct / a.total_attempted : 0;
         valB = b.total_attempted > 0 ? b.total_correct / b.total_attempted : 0;
+      } else if (sortField === "rank") {
+        valA = a.rank ?? 9999;
+        valB = b.rank ?? 9999;
       }
 
       if (valA < valB) return sortDirection === "asc" ? -1 : 1;
