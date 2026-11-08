@@ -1245,8 +1245,8 @@ export default function AdminDashboard({
                     <thead>
                       <tr className="border-b border-zinc-900 text-zinc-500 bg-zinc-950 font-medium">
                         <th className="py-2.5 px-3">Title</th>
-                        <th className="py-2.5 px-3">Questions</th>
-                        <th className="py-2.5 px-3">Marking</th>
+                        <th className="py-2.5 px-3 text-right">Questions</th>
+                        <th className="py-2.5 px-3 text-right">Marking</th>
                         <th className="py-2.5 px-3">Status</th>
                         <th className="py-2.5 px-3 text-right">Action</th>
                       </tr>
@@ -1267,8 +1267,8 @@ export default function AdminDashboard({
                               <td className="py-2.5 px-3 font-medium text-zinc-100 max-w-[200px] truncate">
                                 {test.title}
                               </td>
-                              <td className="py-2.5 px-3 text-zinc-400 tabular-nums">{qCount}</td>
-                              <td className="py-2.5 px-3 text-zinc-400 tabular-nums">
+                              <td className="py-2.5 px-3 text-right text-zinc-400 tabular-nums">{qCount}</td>
+                              <td className="py-2.5 px-3 text-right text-zinc-400 tabular-nums">
                                 +{test.positive_marks ?? 4} / -{test.negative_marks ?? 1}
                               </td>
                               <td className="py-2.5 px-3">
@@ -1497,9 +1497,9 @@ export default function AdminDashboard({
             <CardHeader className="border-b border-zinc-900 pb-4">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
-                  <CardTitle className="text-base font-semibold text-zinc-100 flex items-center gap-2">
+                  <CardTitle className="text-base font-medium text-zinc-100 flex items-center gap-2">
                     <Layers className="w-4 h-4 text-zinc-400" />
-                    <span>Configured test series ({filteredTests.length})</span>
+                    <span>Tests ({filteredTests.length})</span>
                   </CardTitle>
                   <CardDescription className="text-zinc-500 text-xs">
                     Inspect existing tests, modify marking schemes, toggle live status, duplicate, or manage question banks.
@@ -1535,9 +1535,9 @@ export default function AdminDashboard({
                   <thead>
                     <tr className="border-b border-zinc-900 text-zinc-500 bg-zinc-950 font-medium">
                       <th className="py-3 px-4">Title & Context</th>
-                      <th className="py-3 px-4">Questions</th>
-                      <th className="py-3 px-4">Duration</th>
-                      <th className="py-3 px-4">Marking</th>
+                      <th className="py-3 px-4 text-right">Questions</th>
+                      <th className="py-3 px-4 text-right">Duration</th>
+                      <th className="py-3 px-4 text-right">Marking</th>
                       <th className="py-3 px-4">Window</th>
                       <th className="py-3 px-4">Status</th>
                       <th className="py-3 px-4 text-right">Actions</th>
@@ -1561,27 +1561,27 @@ export default function AdminDashboard({
                             <td className="py-3.5 px-4 font-medium text-zinc-100 max-w-xs">
                               <div className="truncate text-xs font-semibold">{test.title}</div>
                               <div className="text-[11px] text-zinc-500 font-normal">
-                                Created {test.created_at ? new Date(test.created_at).toLocaleDateString() : "Recently"}
+                                Created {formatDate(test.created_at)}
                               </div>
                             </td>
 
-                            <td className="py-3.5 px-4 text-zinc-300 tabular-nums">
+                            <td className="py-3.5 px-4 text-right text-zinc-300 tabular-nums">
                               <span className="px-2 py-0.5 bg-zinc-900 border border-zinc-800 rounded-sm text-zinc-300">
                                 {qCount} questions
                               </span>
                             </td>
 
-                            <td className="py-3.5 px-4 text-zinc-400 tabular-nums">{test.duration_minutes}m</td>
+                            <td className="py-3.5 px-4 text-right text-zinc-400 tabular-nums">{test.duration_minutes}m</td>
 
-                            <td className="py-3.5 px-4 text-zinc-400 tabular-nums">
+                            <td className="py-3.5 px-4 text-right text-zinc-400 tabular-nums">
                               +{test.positive_marks ?? 4} / -{test.negative_marks ?? 1}
                             </td>
 
                             <td className="py-3.5 px-4 text-[11px] text-zinc-400">
                               {hasWindow ? (
                                 <span>
-                                  {test.start_time ? new Date(test.start_time).toLocaleDateString() : "Now"} –{" "}
-                                  {test.end_time ? new Date(test.end_time).toLocaleDateString() : "Open"}
+                                  {test.start_time ? formatDate(test.start_time) : "Now"} –{" "}
+                                  {test.end_time ? formatDate(test.end_time) : "Open"}
                                 </span>
                               ) : (
                                 <span className="text-zinc-500">Unrestricted</span>
@@ -1591,13 +1591,20 @@ export default function AdminDashboard({
                             <td className="py-3.5 px-4">
                               <button
                                 type="button"
+                                disabled={qCount === 0 && !isPublished}
                                 onClick={() => handleTogglePublish(test)}
                                 className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-sm border text-[10px] font-medium transition-colors ${
-                                  isPublished
+                                  qCount === 0 && !isPublished
+                                    ? "border-zinc-800 bg-zinc-900/50 text-zinc-600 cursor-not-allowed opacity-60"
+                                    : isPublished
                                     ? "border-emerald-500/30 bg-emerald-950/20 text-emerald-400 hover:bg-emerald-950/40"
                                     : "border-zinc-700 bg-zinc-900 text-zinc-400 hover:text-zinc-200"
                                 }`}
-                                title="Click to toggle publish status"
+                                title={
+                                  qCount === 0 && !isPublished
+                                    ? "Add at least one question before publishing"
+                                    : "Click to toggle publish status"
+                                }
                               >
                                 {isPublished ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
                                 <span>{isPublished ? "Published" : "Draft"}</span>
