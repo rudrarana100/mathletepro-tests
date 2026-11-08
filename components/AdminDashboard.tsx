@@ -2377,9 +2377,9 @@ export default function AdminDashboard({
             <CardHeader className="border-b border-zinc-900 pb-4">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
-                  <CardTitle className="text-base font-semibold text-zinc-100 flex items-center gap-2">
+                  <CardTitle className="text-base font-medium text-zinc-100 flex items-center gap-2">
                     <Users className="w-4 h-4 text-zinc-400" />
-                    <span>Student roster ({aggregatedStudents.length})</span>
+                    <span>Students ({aggregatedStudents.length})</span>
                   </CardTitle>
                   <CardDescription className="text-zinc-500 text-xs">
                     Inspect registered student attempts, aggregate performance metrics, and individual exam scorecards.
@@ -2405,9 +2405,9 @@ export default function AdminDashboard({
                     <tr className="border-b border-zinc-900 text-zinc-500 bg-zinc-950 font-medium">
                       <th className="py-3 px-4">Student profile</th>
                       <th className="py-3 px-4">Role</th>
-                      <th className="py-3 px-4">Tests taken</th>
-                      <th className="py-3 px-4">Average score</th>
-                      <th className="py-3 px-4">Peak score</th>
+                      <th className="py-3 px-4 text-right">Tests taken</th>
+                      <th className="py-3 px-4 text-right">Average score</th>
+                      <th className="py-3 px-4 text-right">Peak score</th>
                       <th className="py-3 px-4">Last activity</th>
                       <th className="py-3 px-4 text-right">Scorecards</th>
                     </tr>
@@ -2439,21 +2439,21 @@ export default function AdminDashboard({
                             </span>
                           </td>
 
-                          <td className="py-3.5 px-4 text-zinc-300 font-medium tabular-nums">
+                          <td className="py-3.5 px-4 text-right text-zinc-300 font-medium tabular-nums">
                             {item.totalAttempts} {item.totalAttempts === 1 ? "exam" : "exams"}
                           </td>
 
-                          <td className="py-3.5 px-4 font-semibold text-zinc-100 tabular-nums">
+                          <td className="py-3.5 px-4 text-right font-medium text-zinc-100 tabular-nums">
                             {item.totalAttempts > 0 ? `${item.avgScore} pts` : "—"}
                           </td>
 
-                          <td className="py-3.5 px-4 text-emerald-400 font-semibold tabular-nums">
+                          <td className="py-3.5 px-4 text-right text-emerald-400 font-medium tabular-nums">
                             {item.totalAttempts > 0 ? `${item.bestScore} pts` : "—"}
                           </td>
 
                           <td className="py-3.5 px-4 text-zinc-400 text-[11px]">
                             {item.lastActive !== "N/A"
-                              ? new Date(item.lastActive).toLocaleDateString()
+                              ? formatDate(item.lastActive)
                               : "No activity"}
                           </td>
 
