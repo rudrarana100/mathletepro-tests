@@ -2830,7 +2830,7 @@ export default function AdminDashboard({
           {/* Live Submissions Feed */}
           <Card className="bg-zinc-950 border-zinc-800 rounded-md shadow-none">
             <CardHeader className="border-b border-zinc-900 pb-4">
-              <CardTitle className="text-sm font-semibold text-zinc-100">
+              <CardTitle className="text-sm font-medium text-zinc-100">
                 Live submissions log ({filteredResults.length})
               </CardTitle>
               <CardDescription className="text-zinc-500 text-xs">
@@ -2844,9 +2844,9 @@ export default function AdminDashboard({
                     <tr className="border-b border-zinc-900 text-zinc-500 bg-zinc-950 font-medium">
                       <th className="py-2.5 px-4">Test title</th>
                       <th className="py-2.5 px-4">Student</th>
-                      <th className="py-2.5 px-4">Score</th>
-                      <th className="py-2.5 px-4">Attempted</th>
-                      <th className="py-2.5 px-4">Correct</th>
+                      <th className="py-2.5 px-4 text-right">Score</th>
+                      <th className="py-2.5 px-4 text-right">Attempted</th>
+                      <th className="py-2.5 px-4 text-right">Correct</th>
                       <th className="py-2.5 px-4">Submitted at</th>
                       <th className="py-2.5 px-4 text-right">Action</th>
                     </tr>
@@ -2869,11 +2869,11 @@ export default function AdminDashboard({
                             <td className="py-3 px-4 text-zinc-400 text-xs max-w-xs truncate" title={studentEmail}>
                               {studentEmail}
                             </td>
-                            <td className="py-3 px-4 font-semibold text-emerald-400 tabular-nums">{item.score} pts</td>
-                            <td className="py-3 px-4 text-zinc-300 tabular-nums">{item.total_attempted}</td>
-                            <td className="py-3 px-4 text-emerald-400 tabular-nums">{item.total_correct}</td>
+                            <td className="py-3 px-4 text-right font-medium text-emerald-400 tabular-nums">{item.score} pts</td>
+                            <td className="py-3 px-4 text-right text-zinc-300 tabular-nums">{item.total_attempted}</td>
+                            <td className="py-3 px-4 text-right text-emerald-400 tabular-nums">{item.total_correct}</td>
                             <td className="py-3 px-4 text-zinc-500 text-[11px]">
-                              {new Date(item.created_at).toLocaleString()}
+                              {formatDate(item.created_at)}
                             </td>
                             <td className="py-3 px-4 text-right">
                               <Button
