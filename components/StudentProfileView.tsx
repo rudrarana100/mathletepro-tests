@@ -27,6 +27,7 @@ export interface StudentProfileData {
   created_at: string;
   testsCompletedCount: number;
   averageScore: number;
+  formattedAvgScore?: string;
 }
 
 export default function StudentProfileView({
@@ -161,8 +162,8 @@ export default function StudentProfileView({
               <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
               <span>Average score</span>
             </div>
-            <div className="text-2xl font-semibold text-emerald-400 tabular-nums">
-              {profile.averageScore > 0 ? `+${profile.averageScore}` : profile.averageScore}
+            <div className="text-xl sm:text-2xl font-semibold text-emerald-400 tabular-nums">
+              {profile.formattedAvgScore || (profile.averageScore > 0 ? `+${profile.averageScore}` : profile.averageScore)}
             </div>
           </div>
         </div>
