@@ -11,7 +11,6 @@ import PageHeader from "@/components/PageHeader";
 import { useToast } from "@/components/Toast";
 import MathRenderer from "@/components/MathRenderer";
 import {
-  Shield,
   Layers,
   HelpCircle,
   Users,
