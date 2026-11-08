@@ -1038,7 +1038,7 @@ export default function AdminDashboard({
       );
     }
     return list;
-  }, [students, allResults, studentSearchTerm]);
+  }, [students, studentResults, studentSearchTerm]);
 
   // Filtered Tests
   const filteredTests = useMemo(() => {
