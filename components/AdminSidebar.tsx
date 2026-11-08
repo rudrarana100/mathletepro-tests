@@ -82,6 +82,7 @@ export default function AdminSidebar({
     { label: "Overview", href: "/admin", icon: Shield },
     { label: "Tests", href: "/admin/tests", icon: Layers },
     { label: "Questions", href: "/admin/questions", icon: HelpCircle },
+    { label: "Upload from Excel", href: "/admin/bulk", icon: FileSpreadsheet },
     { label: "Students", href: "/admin/students", icon: Users },
     { label: "Analytics", href: "/admin/analytics", icon: TrendingUp },
   ];
