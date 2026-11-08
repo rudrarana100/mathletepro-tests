@@ -12,14 +12,24 @@ export default async function StudentProfilePage() {
 
   const { data: results } = await supabase
     .from("test_results")
-    .select("score")
+    .select("score, tests(positive_marks, questions(id))")
     .eq("student_id", user.id);
 
-  const count = results?.length || 0;
-  const avg =
-    count > 0
-      ? Math.round(results!.reduce((acc, r) => acc + (r.score || 0), 0) / count)
-      : 0;
+  const rawResults = results ?? [];
+  const count = rawResults.length;
+  const totalScore = rawResults.reduce((acc, r) => acc + (r.score || 0), 0);
+  const totalMaxMarks = rawResults.reduce((acc, r: { tests?: { positive_marks?: number; questions?: Array<{ id: string }> } | null }) => {
+    const qCount = r.tests?.questions?.length ?? 0;
+    const pos = r.tests?.positive_marks ?? 4;
+    return acc + (qCount * pos);
+  }, 0);
+
+  const avgScore = count > 0 ? Math.round(totalScore / count) : 0;
+  const avgMax = count > 0 ? Math.round(totalMaxMarks / count) : 0;
+  const avgPct = avgMax > 0 ? Math.round((avgScore / avgMax) * 100) : 0;
+  const formattedAvg = count > 0 && avgMax > 0
+    ? `${avgScore} / ${avgMax} (${avgPct}%)`
+    : `${avgScore} pts`;
 
   const profileData: StudentProfileData = {
     id: user.id,
@@ -28,7 +38,8 @@ export default async function StudentProfilePage() {
     role: userProfile.role,
     created_at: userProfile.created_at || new Date().toISOString(),
     testsCompletedCount: count,
-    averageScore: avg,
+    averageScore: avgScore,
+    formattedAvgScore: formattedAvg,
   };
 
   return <StudentProfileView profile={profileData} />;

@@ -381,9 +381,11 @@ function ResultsContent() {
                         : "text-zinc-100"
                     }`}
                   >
-                    {resultData.score > 0 ? `+${resultData.score}` : resultData.score}
+                    {resultData.score}
                   </span>
-                  <span className="text-zinc-500 text-xs font-mono tabular-nums">/ {maxPossibleMarks} marks</span>
+                  <span className="text-zinc-400 text-xs tabular-nums">
+                    / {maxPossibleMarks} ({maxPossibleMarks > 0 ? Math.round((resultData.score / maxPossibleMarks) * 100) : 0}%)
+                  </span>
                 </div>
               </div>
 
@@ -416,8 +418,10 @@ function ResultsContent() {
                 <Award className="w-4 h-4 text-yellow-400" />
               </div>
               <div className="mt-3">
-                <div className="text-2xl font-semibold font-mono tabular-nums text-zinc-100">#{rankInfo.rank}</div>
-                <p className="text-xs text-zinc-500 font-normal mt-0.5">Out of {rankInfo.totalCohort} attempts</p>
+                <div className="text-2xl font-semibold tabular-nums text-zinc-100">
+                  #{rankInfo.rank} of {rankInfo.totalCohort}
+                </div>
+                <p className="text-xs text-zinc-500 font-normal mt-0.5">Cohort rank</p>
               </div>
             </div>
 
