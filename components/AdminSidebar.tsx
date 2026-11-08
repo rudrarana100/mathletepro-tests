@@ -18,6 +18,7 @@ import {
   Menu,
   X,
   Search,
+  FileSpreadsheet,
 } from "lucide-react";
 
 interface AdminSidebarProps {
