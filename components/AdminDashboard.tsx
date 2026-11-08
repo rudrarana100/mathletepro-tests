@@ -2183,9 +2183,9 @@ export default function AdminDashboard({
             <CardHeader className="border-b border-zinc-900 pb-4">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
-                  <CardTitle className="text-base font-semibold text-zinc-100 flex items-center gap-2">
+                  <CardTitle className="text-base font-medium text-zinc-100 flex items-center gap-2">
                     <FileSpreadsheet className="w-4 h-4 text-zinc-400" />
-                    <span>Excel bulk question import studio</span>
+                    <span>Upload from Excel</span>
                   </CardTitle>
                   <CardDescription className="text-zinc-500 text-xs">
                     Batch upload questions from spreadsheet with client-side syntax validation, error preview, and batch commit.
