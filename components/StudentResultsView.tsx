@@ -21,6 +21,7 @@ export interface StudentResultRow {
   total_correct: number;
   created_at: string;
   rank?: number | null;
+  totalCohort?: number | null;
   tests?: {
     title: string;
     duration_minutes: number;
