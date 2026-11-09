@@ -499,26 +499,37 @@ export default function AdminDashboard({
 
     try {
       const parsedMaxStrikes = parseInt(editMaxStrikes, 10);
-      const { error } = await supabase
+      const updatePayload: Record<string, unknown> = {
+        title: editTitle.trim(),
+        duration_minutes: parseInt(editDuration, 10) || 60,
+        positive_marks: parseFloat(editPositiveMarks) || 4,
+        negative_marks: parseFloat(editNegativeMarks) || 1,
+        max_strikes: !isNaN(parsedMaxStrikes) && parsedMaxStrikes >= 0 ? parsedMaxStrikes : 3,
+        is_published: editIsPublished,
+        start_time: editStartTime ? new Date(editStartTime).toISOString() : null,
+        end_time: editEndTime ? new Date(editEndTime).toISOString() : null,
+      };
+
+      let { error } = await supabase
         .from("tests")
-        .update({
-          title: editTitle.trim(),
-          duration_minutes: parseInt(editDuration, 10) || 60,
-          positive_marks: parseFloat(editPositiveMarks) || 4,
-          negative_marks: parseFloat(editNegativeMarks) || 1,
-          max_strikes: !isNaN(parsedMaxStrikes) && parsedMaxStrikes >= 0 ? parsedMaxStrikes : 3,
-          is_published: editIsPublished,
-          start_time: editStartTime ? new Date(editStartTime).toISOString() : null,
-          end_time: editEndTime ? new Date(editEndTime).toISOString() : null,
-        })
+        .update(updatePayload)
         .eq("id", editingTest.id);
+
+      if (error && (error.code === "42703" || error.message?.includes("max_strikes"))) {
+        delete updatePayload.max_strikes;
+        const retry = await supabase
+          .from("tests")
+          .update(updatePayload)
+          .eq("id", editingTest.id);
+        error = retry.error;
+      }
 
       if (error) throw error;
       setEditingTest(null);
       await fetchAdminData();
       success("Test settings updated successfully.");
     } catch (err) {
-      toastError("Failed to update test: " + (err instanceof Error ? err.message : "Unknown error"));
+      toastError("Failed to update test: " + getErrorMessage(err));
     }
   };
 
@@ -526,22 +537,33 @@ export default function AdminDashboard({
     if (!confirm(`Duplicate test "${test.title}" along with all its questions?`)) return;
 
     try {
-      const { data: newTest, error: testErr } = await supabase
+      const clonePayload: Record<string, unknown> = {
+        title: `${test.title} (Copy)`,
+        duration_minutes: test.duration_minutes,
+        positive_marks: test.positive_marks ?? 4,
+        negative_marks: test.negative_marks ?? 1,
+        max_strikes: test.max_strikes ?? 3,
+        is_published: false,
+        start_time: test.start_time,
+        end_time: test.end_time,
+      };
+
+      let { data: newTest, error: testErr } = await supabase
         .from("tests")
-        .insert([
-          {
-            title: `${test.title} (Copy)`,
-            duration_minutes: test.duration_minutes,
-            positive_marks: test.positive_marks ?? 4,
-            negative_marks: test.negative_marks ?? 1,
-            max_strikes: test.max_strikes ?? 3,
-            is_published: false,
-            start_time: test.start_time,
-            end_time: test.end_time,
-          },
-        ])
+        .insert([clonePayload])
         .select()
         .single();
+
+      if (testErr && (testErr.code === "42703" || testErr.message?.includes("max_strikes"))) {
+        delete clonePayload.max_strikes;
+        const retry = await supabase
+          .from("tests")
+          .insert([clonePayload])
+          .select()
+          .single();
+        newTest = retry.data;
+        testErr = retry.error;
+      }
 
       if (testErr || !newTest) throw testErr || new Error("Could not clone test");
 
@@ -565,7 +587,7 @@ export default function AdminDashboard({
       setSelectedTestId(newTest.id);
       success(`Cloned "${test.title}" into a new draft test.`);
     } catch (err) {
-      toastError("Failed to duplicate test: " + (err instanceof Error ? err.message : "Unknown error"));
+      toastError("Failed to duplicate test: " + getErrorMessage(err));
     }
   };
 
