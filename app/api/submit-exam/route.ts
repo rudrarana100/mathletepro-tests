@@ -153,7 +153,7 @@ export async function POST(req: Request) {
     });
 
     const nowIso = new Date().toISOString();
-    const insertPayload = {
+    const insertPayload: Record<string, unknown> = {
       test_id: testId,
       student_id: user.id,
       score,
@@ -164,34 +164,51 @@ export async function POST(req: Request) {
       created_at: nowIso,
     };
 
-    const { data: result, error: insertError } = await adminSupabase
+    let { data: result, error: insertError } = await adminSupabase
       .from("test_results")
       .insert([insertPayload])
       .select("id, score, total_attempted, total_correct")
       .single();
 
-    if (insertError) {
+    if (insertError && (insertError.code === "42703" || insertError.message?.includes("submission_reason"))) {
+      delete insertPayload.submission_reason;
+      const retry = await adminSupabase
+        .from("test_results")
+        .insert([insertPayload])
+        .select("id, score, total_attempted, total_correct")
+        .single();
+      result = retry.data;
+      insertError = retry.error;
+    }
+
+    if (insertError || !result) {
       return NextResponse.json(
-        { error: "Failed to record examination scorecard: " + insertError.message },
+        { error: "Failed to record examination scorecard: " + (insertError?.message || "Unknown error") },
         { status: 500 }
       );
     }
 
     // Update attempts record
     try {
-      await adminSupabase
+      const attemptPayload: Record<string, unknown> = {
+        user_id: user.id,
+        test_id: testId,
+        status: "completed",
+        submitted_at: nowIso,
+        result_id: result.id,
+        submission_reason: submissionReason,
+      };
+
+      const { error: attErr } = await adminSupabase
         .from("attempts")
-        .upsert(
-          {
-            user_id: user.id,
-            test_id: testId,
-            status: "completed",
-            submitted_at: nowIso,
-            result_id: result.id,
-            submission_reason: submissionReason,
-          },
-          { onConflict: "user_id,test_id" }
-        );
+        .upsert(attemptPayload, { onConflict: "user_id,test_id" });
+
+      if (attErr && (attErr.code === "42703" || attErr.message?.includes("submission_reason"))) {
+        delete attemptPayload.submission_reason;
+        await adminSupabase
+          .from("attempts")
+          .upsert(attemptPayload, { onConflict: "user_id,test_id" });
+      }
     } catch {
       // attempts table is auxiliary
     }
