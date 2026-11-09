@@ -112,6 +112,18 @@ interface QuestionAnalytics {
   missRate: number;
   accuracyRate: number;
   difficultyIndicator: "easy" | "medium" | "hard";
+function getErrorMessage(err: unknown, fallback = "Unknown error"): string {
+  if (!err) return fallback;
+  if (typeof err === "string") return err;
+  if (err instanceof Error) return err.message;
+  if (typeof err === "object") {
+    const anyErr = err as Record<string, unknown>;
+    if (typeof anyErr.message === "string") return anyErr.message;
+    if (typeof anyErr.error_description === "string") return anyErr.error_description;
+    if (typeof anyErr.error === "string") return anyErr.error;
+    if (typeof anyErr.details === "string" && anyErr.details.trim()) return anyErr.details;
+  }
+  return fallback;
 }
 
 export default function AdminDashboard({
@@ -227,11 +239,22 @@ export default function AdminDashboard({
       let loadedResults: TestResultRecord[] = [];
 
       try {
-        const [testRes, resultsRes, profileRes] = await Promise.all([
-          supabase
+        const testPromise = (async () => {
+          let res = await supabase
             .from("tests")
             .select("id, title, duration_minutes, positive_marks, negative_marks, max_strikes, is_published, start_time, end_time, created_at, questions(id)")
-            .order("created_at", { ascending: false }),
+            .order("created_at", { ascending: false });
+          if (res.error && res.error.code === "42703") {
+            res = await supabase
+              .from("tests")
+              .select("id, title, duration_minutes, positive_marks, negative_marks, is_published, start_time, end_time, created_at, questions(id)")
+              .order("created_at", { ascending: false });
+          }
+          return res;
+        })();
+
+        const [testRes, resultsRes, profileRes] = await Promise.all([
+          testPromise,
           supabase
             .from("test_results")
             .select("id, student_id, test_id, score, total_attempted, total_correct, answers, created_at, tests(title)")
