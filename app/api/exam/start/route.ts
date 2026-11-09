@@ -99,11 +99,21 @@ export async function POST(req: Request) {
       );
     }
 
-    const { data: testData, error: testError } = await supabase
+    let { data: testData, error: testError } = await supabase
       .from("tests")
       .select("id, title, duration_minutes, positive_marks, negative_marks, max_strikes, is_published, start_time, end_time")
       .eq("id", testId)
       .maybeSingle();
+
+    if (testError && (testError.code === "42703" || testError.message?.includes("max_strikes"))) {
+      const retry = await supabase
+        .from("tests")
+        .select("id, title, duration_minutes, positive_marks, negative_marks, is_published, start_time, end_time")
+        .eq("id", testId)
+        .maybeSingle();
+      testData = retry.data ? { ...retry.data, max_strikes: 3 } : null;
+      testError = retry.error;
+    }
 
     if (testError || !testData) {
       return NextResponse.json(
