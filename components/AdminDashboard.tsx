@@ -51,6 +51,7 @@ interface Test {
   is_published?: boolean;
   start_time?: string | null;
   end_time?: string | null;
+  max_strikes?: number;
   created_at?: string;
   questions?: Array<{ id: string }>;
 }
@@ -143,6 +144,7 @@ export default function AdminDashboard({
   const [newTestDuration, setNewTestDuration] = useState("60");
   const [newPositiveMarks, setNewPositiveMarks] = useState("4");
   const [newNegativeMarks, setNewNegativeMarks] = useState("1");
+  const [newMaxStrikes, setNewMaxStrikes] = useState("3");
   const [newIsPublished, setNewIsPublished] = useState(true);
   const [newStartTime, setNewStartTime] = useState("");
   const [newEndTime, setNewEndTime] = useState("");
@@ -154,6 +156,7 @@ export default function AdminDashboard({
   const [editDuration, setEditDuration] = useState("60");
   const [editPositiveMarks, setEditPositiveMarks] = useState("4");
   const [editNegativeMarks, setEditNegativeMarks] = useState("1");
+  const [editMaxStrikes, setEditMaxStrikes] = useState("3");
   const [editIsPublished, setEditIsPublished] = useState(true);
   const [editStartTime, setEditStartTime] = useState("");
   const [editEndTime, setEditEndTime] = useState("");
@@ -227,7 +230,7 @@ export default function AdminDashboard({
         const [testRes, resultsRes, profileRes] = await Promise.all([
           supabase
             .from("tests")
-            .select("id, title, duration_minutes, positive_marks, negative_marks, is_published, start_time, end_time, created_at, questions(id)")
+            .select("id, title, duration_minutes, positive_marks, negative_marks, max_strikes, is_published, start_time, end_time, created_at, questions(id)")
             .order("created_at", { ascending: false }),
           supabase
             .from("test_results")
@@ -375,11 +378,13 @@ export default function AdminDashboard({
     setIsCreatingTest(true);
 
     try {
+      const parsedMaxStrikes = parseInt(newMaxStrikes, 10);
       const payload = {
         title: newTestTitle.trim(),
         duration_minutes: parseInt(newTestDuration, 10) || 60,
         positive_marks: parseFloat(newPositiveMarks) || 4,
         negative_marks: parseFloat(newNegativeMarks) || 1,
+        max_strikes: !isNaN(parsedMaxStrikes) && parsedMaxStrikes >= 0 ? parsedMaxStrikes : 3,
         is_published: newIsPublished,
         start_time: newStartTime ? new Date(newStartTime).toISOString() : null,
         end_time: newEndTime ? new Date(newEndTime).toISOString() : null,
@@ -396,6 +401,7 @@ export default function AdminDashboard({
       setNewTestTitle("");
       setNewStartTime("");
       setNewEndTime("");
+      setNewMaxStrikes("3");
       await fetchAdminData();
       if (data) {
         setSelectedTestId(data.id);
@@ -441,6 +447,7 @@ export default function AdminDashboard({
     setEditDuration(test.duration_minutes.toString());
     setEditPositiveMarks((test.positive_marks ?? 4).toString());
     setEditNegativeMarks((test.negative_marks ?? 1).toString());
+    setEditMaxStrikes((test.max_strikes ?? 3).toString());
     setEditIsPublished(test.is_published ?? true);
     setEditStartTime(test.start_time ? new Date(test.start_time).toISOString().slice(0, 16) : "");
     setEditEndTime(test.end_time ? new Date(test.end_time).toISOString().slice(0, 16) : "");
@@ -457,6 +464,7 @@ export default function AdminDashboard({
     }
 
     try {
+      const parsedMaxStrikes = parseInt(editMaxStrikes, 10);
       const { error } = await supabase
         .from("tests")
         .update({
@@ -464,6 +472,7 @@ export default function AdminDashboard({
           duration_minutes: parseInt(editDuration, 10) || 60,
           positive_marks: parseFloat(editPositiveMarks) || 4,
           negative_marks: parseFloat(editNegativeMarks) || 1,
+          max_strikes: !isNaN(parsedMaxStrikes) && parsedMaxStrikes >= 0 ? parsedMaxStrikes : 3,
           is_published: editIsPublished,
           start_time: editStartTime ? new Date(editStartTime).toISOString() : null,
           end_time: editEndTime ? new Date(editEndTime).toISOString() : null,
@@ -491,6 +500,7 @@ export default function AdminDashboard({
             duration_minutes: test.duration_minutes,
             positive_marks: test.positive_marks ?? 4,
             negative_marks: test.negative_marks ?? 1,
+            max_strikes: test.max_strikes ?? 3,
             is_published: false,
             start_time: test.start_time,
             end_time: test.end_time,
@@ -1391,7 +1401,7 @@ export default function AdminDashboard({
             <CardContent className="pt-5">
               <form onSubmit={handleCreateTest} className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
-                  <div className="space-y-1.5 md:col-span-5">
+                  <div className="space-y-1.5 md:col-span-4">
                     <Label className="text-xs text-zinc-400 font-medium">Test title</Label>
                     <Input
                       required
@@ -1426,7 +1436,7 @@ export default function AdminDashboard({
                     />
                   </div>
 
-                  <div className="space-y-1.5 md:col-span-3">
+                  <div className="space-y-1.5 md:col-span-2">
                     <Label className="text-xs text-zinc-400 font-medium">Negative (-)</Label>
                     <Input
                       required
@@ -1436,6 +1446,21 @@ export default function AdminDashboard({
                       onChange={(e) => setNewNegativeMarks(e.target.value)}
                       className="bg-black border-zinc-800 rounded-md text-zinc-100 text-xs tabular-nums"
                     />
+                  </div>
+
+                  <div className="space-y-1.5 md:col-span-2">
+                    <Label className="text-xs text-zinc-400 font-medium">Max strikes</Label>
+                    <Input
+                      required
+                      type="number"
+                      min="0"
+                      value={newMaxStrikes}
+                      onChange={(e) => setNewMaxStrikes(e.target.value)}
+                      className="bg-black border-zinc-800 rounded-md text-zinc-100 text-xs tabular-nums"
+                    />
+                    <p className="text-[10px] text-zinc-500 leading-tight">
+                      Number of times a student can leave the exam window before it is submitted automatically.
+                    </p>
                   </div>
                 </div>
 
@@ -2924,7 +2949,7 @@ export default function AdminDashboard({
                 />
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div className="space-y-1.5">
                   <Label className="text-xs text-zinc-400 font-medium">Duration (m)</Label>
                   <Input
@@ -2959,7 +2984,22 @@ export default function AdminDashboard({
                     className="bg-black border-zinc-800 rounded-md text-xs tabular-nums"
                   />
                 </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-zinc-400 font-medium">Max strikes</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    required
+                    value={editMaxStrikes}
+                    onChange={(e) => setEditMaxStrikes(e.target.value)}
+                    className="bg-black border-zinc-800 rounded-md text-xs tabular-nums"
+                  />
+                </div>
               </div>
+              <p className="text-[11px] text-zinc-500">
+                Number of times a student can leave the exam window before it is submitted automatically.
+              </p>
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">

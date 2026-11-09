@@ -103,6 +103,7 @@ CREATE TABLE IF NOT EXISTS public.tests (
     is_published BOOLEAN NOT NULL DEFAULT true,
     start_time TIMESTAMPTZ,
     end_time TIMESTAMPTZ,
+    max_strikes INTEGER NOT NULL DEFAULT 3,
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
@@ -113,6 +114,7 @@ ADD COLUMN IF NOT EXISTS negative_marks NUMERIC NOT NULL DEFAULT 1,
 ADD COLUMN IF NOT EXISTS is_published BOOLEAN NOT NULL DEFAULT true,
 ADD COLUMN IF NOT EXISTS start_time TIMESTAMPTZ,
 ADD COLUMN IF NOT EXISTS end_time TIMESTAMPTZ,
+ADD COLUMN IF NOT EXISTS max_strikes INTEGER NOT NULL DEFAULT 3,
 ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now());
 
 ALTER TABLE public.tests ENABLE ROW LEVEL SECURITY;
@@ -418,7 +420,10 @@ USING (public.is_admin());
 -- ----------------------------------------------------------------
 -- 9. Atomic Attempt Starter RPC: start_exam_attempt
 -- ----------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.start_exam_attempt(p_test_id UUID)
+CREATE OR REPLACE FUNCTION public.start_exam_attempt(
+    p_test_id UUID,
+    p_action TEXT DEFAULT 'begin'
+)
 RETURNS JSONB AS $$
 DECLARE
     v_user_id UUID;
@@ -456,48 +461,7 @@ BEGIN
         );
     END IF;
 
-    -- Check for an existing in-progress attempt
-    SELECT * INTO v_attempt FROM public.attempts
-    WHERE user_id = v_user_id AND test_id = p_test_id;
-
-    IF FOUND THEN
-        IF v_attempt.status = 'completed' AND v_attempt.result_id IS NOT NULL THEN
-            RETURN jsonb_build_object(
-                'alreadyCompleted', true,
-                'resultId', v_attempt.result_id
-            );
-        END IF;
-
-        IF v_attempt.end_time IS NOT NULL THEN
-            v_remaining_seconds := GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (v_attempt.end_time - v_now))))::integer;
-        ELSE
-            v_remaining_seconds := (COALESCE(v_test.duration_minutes, 60) * 60);
-            v_end_time := v_attempt.started_at + (COALESCE(v_test.duration_minutes, 60) || ' minutes')::interval;
-            UPDATE public.attempts SET end_time = v_end_time WHERE id = v_attempt.id;
-        END IF;
-    ELSE
-        v_end_time := v_now + (COALESCE(v_test.duration_minutes, 60) || ' minutes')::interval;
-        v_remaining_seconds := (COALESCE(v_test.duration_minutes, 60) * 60);
-
-        INSERT INTO public.attempts (
-            user_id,
-            test_id,
-            status,
-            started_at,
-            end_time,
-            strikes
-        )
-        VALUES (
-            v_user_id,
-            p_test_id,
-            'in_progress',
-            v_now,
-            v_end_time,
-            0
-        )
-        RETURNING * INTO v_attempt;
-    END IF;
-
+    -- Extract safe questions (omitting correct_option_index and solution)
     SELECT COALESCE(
         jsonb_agg(
             jsonb_build_object(
@@ -514,37 +478,125 @@ BEGIN
     FROM public.questions q
     WHERE q.test_id = p_test_id;
 
+    -- Check for an existing attempt
+    SELECT * INTO v_attempt FROM public.attempts
+    WHERE user_id = v_user_id AND test_id = p_test_id;
+
+    IF FOUND THEN
+        IF v_attempt.status = 'completed' AND v_attempt.result_id IS NOT NULL THEN
+            RETURN jsonb_build_object(
+                'alreadyCompleted', true,
+                'resultId', v_attempt.result_id
+            );
+        END IF;
+
+        -- Calculate remaining time from server-pinned end_time
+        IF v_attempt.end_time IS NOT NULL THEN
+            v_remaining_seconds := GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (v_attempt.end_time - v_now))))::integer;
+        ELSE
+            v_remaining_seconds := (COALESCE(v_test.duration_minutes, 60) * 60);
+            v_end_time := v_attempt.started_at + (COALESCE(v_test.duration_minutes, 60) || ' minutes')::interval;
+            UPDATE public.attempts SET end_time = v_end_time WHERE id = v_attempt.id;
+        END IF;
+
+        RETURN jsonb_build_object(
+            'success', true,
+            'hasActiveAttempt', true,
+            'test', jsonb_build_object(
+                'id', v_test.id,
+                'title', v_test.title,
+                'duration_minutes', v_test.duration_minutes,
+                'positive_marks', v_test.positive_marks,
+                'negative_marks', v_test.negative_marks,
+                'max_strikes', COALESCE(v_test.max_strikes, 3)
+            ),
+            'questions', v_questions,
+            'remainingSeconds', v_remaining_seconds,
+            'serverNow', v_now,
+            'startedAt', v_attempt.started_at,
+            'endTime', v_attempt.end_time,
+            'strikes', COALESCE(v_attempt.strikes, 0)
+        );
+    END IF;
+
+    -- If p_action = 'init', do NOT create attempt yet. Return metadata so client can show instructions screen.
+    IF p_action = 'init' THEN
+        RETURN jsonb_build_object(
+            'success', true,
+            'hasActiveAttempt', false,
+            'test', jsonb_build_object(
+                'id', v_test.id,
+                'title', v_test.title,
+                'duration_minutes', v_test.duration_minutes,
+                'positive_marks', v_test.positive_marks,
+                'negative_marks', v_test.negative_marks,
+                'max_strikes', COALESCE(v_test.max_strikes, 3)
+            ),
+            'questions', v_questions,
+            'remainingSeconds', (COALESCE(v_test.duration_minutes, 60) * 60),
+            'serverNow', v_now,
+            'strikes', 0
+        );
+    END IF;
+
+    -- First time beginning this exam (p_action = 'begin'): create official attempt record
+    v_end_time := v_now + (COALESCE(v_test.duration_minutes, 60) || ' minutes')::interval;
+    v_remaining_seconds := (COALESCE(v_test.duration_minutes, 60) * 60);
+
+    INSERT INTO public.attempts (
+        user_id,
+        test_id,
+        status,
+        started_at,
+        end_time,
+        strikes
+    )
+    VALUES (
+        v_user_id,
+        p_test_id,
+        'in_progress',
+        v_now,
+        v_end_time,
+        0
+    )
+    RETURNING * INTO v_attempt;
+
     RETURN jsonb_build_object(
         'success', true,
+        'hasActiveAttempt', true,
         'test', jsonb_build_object(
             'id', v_test.id,
             'title', v_test.title,
             'duration_minutes', v_test.duration_minutes,
             'positive_marks', v_test.positive_marks,
-            'negative_marks', v_test.negative_marks
+            'negative_marks', v_test.negative_marks,
+            'max_strikes', COALESCE(v_test.max_strikes, 3)
         ),
         'questions', v_questions,
         'remainingSeconds', v_remaining_seconds,
+        'serverNow', v_now,
         'startedAt', v_attempt.started_at,
         'endTime', v_attempt.end_time,
-        'strikes', COALESCE(v_attempt.strikes, 0)
+        'strikes', 0
     );
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
-GRANT EXECUTE ON FUNCTION public.start_exam_attempt(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.start_exam_attempt(UUID, TEXT) TO authenticated;
 
 -- ----------------------------------------------------------------
 -- 10. Atomic Server-Side Grading RPC: grade_and_submit_exam
 -- ----------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.grade_and_submit_exam(
     p_test_id UUID,
-    p_answers JSONB
+    p_answers JSONB,
+    p_reason TEXT DEFAULT 'student_submitted'
 )
 RETURNS JSONB AS $$
 DECLARE
     v_user_id UUID;
     v_test RECORD;
+    v_attempt RECORD;
     v_existing_result UUID;
     v_score NUMERIC := 0;
     v_correct INTEGER := 0;
@@ -576,6 +628,10 @@ BEGIN
         RAISE EXCEPTION 'You have already completed and submitted this examination.' USING ERRCODE = '40302';
     END IF;
 
+    -- Fetch attempt
+    SELECT * INTO v_attempt FROM public.attempts
+    WHERE user_id = v_user_id AND test_id = p_test_id;
+
     -- Grade all questions against verified answer key
     FOR v_q IN SELECT id, correct_option_index FROM public.questions WHERE test_id = p_test_id LOOP
         v_student_ans := p_answers->>v_q.id::text;
@@ -590,7 +646,7 @@ BEGIN
         END IF;
     END LOOP;
 
-    -- Record official score in test_results
+    -- Record official score in test_results with submission_reason
     INSERT INTO public.test_results (
         student_id,
         test_id,
@@ -598,6 +654,7 @@ BEGIN
         total_attempted,
         total_correct,
         answers,
+        submission_reason,
         created_at
     )
     VALUES (
@@ -607,44 +664,34 @@ BEGIN
         v_attempted,
         v_correct,
         COALESCE(p_answers, '{}'::jsonb),
+        COALESCE(p_reason, 'student_submitted'),
         v_now
     )
     RETURNING id INTO v_new_result_id;
 
-    -- Update or insert attempts record
-    INSERT INTO public.attempts (
-        user_id,
-        test_id,
-        status,
-        started_at,
-        submitted_at,
-        result_id
-    )
-    VALUES (
-        v_user_id,
-        p_test_id,
-        'completed',
-        v_now,
-        v_now,
-        v_new_result_id
-    )
-    ON CONFLICT (user_id, test_id)
-    DO UPDATE SET
-        status = 'completed',
-        submitted_at = v_now,
-        result_id = v_new_result_id;
+    -- Mark attempt as completed and link scorecard
+    IF v_attempt.id IS NOT NULL THEN
+        UPDATE public.attempts
+        SET
+            status = 'completed',
+            submitted_at = v_now,
+            result_id = v_new_result_id,
+            submission_reason = COALESCE(p_reason, 'student_submitted')
+        WHERE id = v_attempt.id;
+    END IF;
 
     RETURN jsonb_build_object(
         'id', v_new_result_id,
         'score', v_score::integer,
         'total_attempted', v_attempted,
         'total_correct', v_correct,
+        'reason', p_reason,
         'created_at', v_now
     );
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
-GRANT EXECUTE ON FUNCTION public.grade_and_submit_exam(UUID, JSONB) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.grade_and_submit_exam(UUID, JSONB, TEXT) TO authenticated;
 
 -- ----------------------------------------------------------------
 -- 10. Performance Indexes & Analytical SQL Functions

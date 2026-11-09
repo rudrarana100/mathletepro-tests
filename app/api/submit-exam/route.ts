@@ -18,7 +18,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const { testId, answers } = await req.json();
+    const { testId, answers, reason } = await req.json();
 
     if (!testId) {
       return NextResponse.json(
@@ -42,6 +42,7 @@ export async function POST(req: Request) {
     }
 
     const studentAnswers = answers || {};
+    const submissionReason = reason || "student_submitted";
 
     // 1. Primary: Atomic server-side grading via Postgres RPC (grade_and_submit_exam)
     // Runs inside Postgres with SECURITY DEFINER privileges.
@@ -51,6 +52,7 @@ export async function POST(req: Request) {
         {
           p_test_id: testId,
           p_answers: studentAnswers,
+          p_reason: submissionReason,
         }
       );
 
@@ -61,6 +63,7 @@ export async function POST(req: Request) {
           score: rpcResult.score,
           totalAttempted: rpcResult.total_attempted,
           totalCorrect: rpcResult.total_correct,
+          reason: submissionReason,
         });
       }
 
@@ -157,6 +160,7 @@ export async function POST(req: Request) {
       total_attempted: attempted,
       total_correct: correct,
       answers: studentAnswers,
+      submission_reason: submissionReason,
       created_at: nowIso,
     };
 
@@ -184,6 +188,7 @@ export async function POST(req: Request) {
             status: "completed",
             submitted_at: nowIso,
             result_id: result.id,
+            submission_reason: submissionReason,
           },
           { onConflict: "user_id,test_id" }
         );

@@ -28,6 +28,7 @@ interface ResultData {
   total_correct: number;
   answers_data: Record<string, number>;
   answers?: Record<string, number>;
+  submission_reason?: string;
   created_at?: string;
 }
 
@@ -355,6 +356,17 @@ function ResultsContent() {
             </div>
           }
         />
+
+        {/* Security notice if submitted due to leaving exam window */}
+        {(searchParams.get("reason") === "strike_limit_exceeded" ||
+          resultData.submission_reason === "strike_limit_exceeded") && (
+          <div className="bg-red-950/30 border border-red-500/40 rounded-lg p-4 flex items-center gap-3 text-red-300 text-sm animate-in fade-in duration-200">
+            <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
+            <span className="font-normal">
+              Your test was submitted because you left the exam window too many times.
+            </span>
+          </div>
+        )}
 
         {/* 1. Hero Grid: Donut Chart, Scorecard, and Performance Rank */}
         <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
