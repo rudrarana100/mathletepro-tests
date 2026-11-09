@@ -47,32 +47,72 @@ export async function POST(req: Request) {
     // 1. Primary: Atomic server-side grading via Postgres RPC (grade_and_submit_exam)
     // Runs inside Postgres with SECURITY DEFINER privileges.
     try {
-      const { data: rpcResult, error: rpcError } = await supabase.rpc(
-        "grade_and_submit_exam",
-        {
+      let rpcResult: any = null;
+      let rpcError: any = null;
+
+      // Try 3-parameter signature first (if migration 08 has been run)
+      const res3 = await supabase.rpc("grade_and_submit_exam", {
+        p_test_id: testId,
+        p_answers: studentAnswers,
+        p_reason: submissionReason,
+      });
+
+      if (!res3.error && res3.data) {
+        rpcResult = res3.data;
+      } else if (
+        res3.error &&
+        (res3.error.message?.includes("function") ||
+          res3.error.message?.includes("schema cache") ||
+          res3.error.code === "PGRST202")
+      ) {
+        // Fallback: 2-parameter signature: grade_and_submit_exam(p_test_id, p_answers)
+        const res2 = await supabase.rpc("grade_and_submit_exam", {
           p_test_id: testId,
           p_answers: studentAnswers,
-          p_reason: submissionReason,
-        }
-      );
+        });
 
-      if (!rpcError && rpcResult) {
+        if (!res2.error && res2.data) {
+          rpcResult = res2.data;
+        } else {
+          rpcError = res2.error;
+        }
+      } else {
+        rpcError = res3.error;
+      }
+
+      if (rpcResult) {
+        const finalResultId = rpcResult.id || rpcResult.resultId;
+
+        // Record submission_reason auxiliary if possible
+        if (submissionReason && submissionReason !== "student_submitted") {
+          try {
+            await supabase
+              .from("attempts")
+              .update({ submission_reason: submissionReason })
+              .eq("user_id", user.id)
+              .eq("test_id", testId);
+          } catch {
+            // auxiliary
+          }
+        }
+
         return NextResponse.json({
           success: true,
-          resultId: rpcResult.id,
+          resultId: finalResultId,
           score: rpcResult.score,
-          totalAttempted: rpcResult.total_attempted,
-          totalCorrect: rpcResult.total_correct,
+          totalAttempted: rpcResult.total_attempted ?? rpcResult.totalAttempted,
+          totalCorrect: rpcResult.total_correct ?? rpcResult.totalCorrect,
           reason: submissionReason,
         });
       }
 
-      // If the RPC returned a validation error (e.g. already submitted), surface it
+      // If the RPC returned an explicit error (e.g. already submitted), surface it
       if (
         rpcError &&
         rpcError.message &&
         !rpcError.message.includes("function") &&
-        !rpcError.message.includes("does not exist")
+        !rpcError.message.includes("does not exist") &&
+        !rpcError.message.includes("schema cache")
       ) {
         return NextResponse.json(
           { error: rpcError.message },
@@ -80,11 +120,15 @@ export async function POST(req: Request) {
         );
       }
     } catch {
-      // Fall through to admin client fallback if RPC is unavailable
+      // Fall through to fallback client grading if RPC is unavailable
     }
 
-    // 2. Fallback: Secure server grading using service-role admin client
-    const adminSupabase = createAdminClient();
+    // 2. Fallback: Secure server grading
+    // Use service-role client if configured; otherwise use the authenticated user's client
+    // so queries are not blocked by RLS policies requiring an authenticated user.
+    const adminSupabase = process.env.SUPABASE_SERVICE_ROLE_KEY
+      ? createAdminClient()
+      : supabase;
 
     // Check if user already submitted
     const { data: existingResult } = await adminSupabase

@@ -1076,7 +1076,7 @@ function ExamEngineContent() {
             <div className="flex items-center gap-2.5 text-red-400">
               <AlertTriangle className="w-5 h-5 shrink-0" />
               <h3 className="text-sm font-semibold tracking-tight">
-                Network disruption
+                {submissionError.toLowerCase().includes("network") ? "Network disruption" : "Submission notice"}
               </h3>
             </div>
             <p className="text-zinc-300 text-sm leading-relaxed font-normal">
