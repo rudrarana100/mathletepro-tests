@@ -402,7 +402,7 @@ export default function AdminDashboard({
 
     try {
       const parsedMaxStrikes = parseInt(newMaxStrikes, 10);
-      const payload = {
+      const payload: Record<string, unknown> = {
         title: newTestTitle.trim(),
         duration_minutes: parseInt(newTestDuration, 10) || 60,
         positive_marks: parseFloat(newPositiveMarks) || 4,
@@ -413,11 +413,22 @@ export default function AdminDashboard({
         end_time: newEndTime ? new Date(newEndTime).toISOString() : null,
       };
 
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from("tests")
         .insert([payload])
         .select()
         .single();
+
+      if (error && (error.code === "42703" || error.message?.includes("max_strikes"))) {
+        delete payload.max_strikes;
+        const retry = await supabase
+          .from("tests")
+          .insert([payload])
+          .select()
+          .single();
+        data = retry.data;
+        error = retry.error;
+      }
 
       if (error) throw error;
 
@@ -429,9 +440,9 @@ export default function AdminDashboard({
       if (data) {
         setSelectedTestId(data.id);
       }
-      success(`Test series "${payload.title}" created successfully.`);
+      success(`Test series "${newTestTitle.trim()}" created successfully.`);
     } catch (err) {
-      toastError("Failed to create test: " + (err instanceof Error ? err.message : "Unknown error"));
+      toastError("Failed to create test: " + getErrorMessage(err));
     } finally {
       setIsCreatingTest(false);
     }
