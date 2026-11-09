@@ -112,6 +112,8 @@ interface QuestionAnalytics {
   missRate: number;
   accuracyRate: number;
   difficultyIndicator: "easy" | "medium" | "hard";
+}
+
 function getErrorMessage(err: unknown, fallback = "Unknown error"): string {
   if (!err) return fallback;
   if (typeof err === "string") return err;
@@ -240,7 +242,7 @@ export default function AdminDashboard({
 
       try {
         const testPromise = (async () => {
-          let res = await supabase
+          let res: any = await supabase
             .from("tests")
             .select("id, title, duration_minutes, positive_marks, negative_marks, max_strikes, is_published, start_time, end_time, created_at, questions(id)")
             .order("created_at", { ascending: false });
