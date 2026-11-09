@@ -25,6 +25,8 @@ ADD COLUMN IF NOT EXISTS submission_reason TEXT;
 -- 3. Atomic Attempt Starter RPC: start_exam_attempt
 -- Supports p_action: 'init' (inspects status without creating attempt)
 --               and 'begin' (creates attempt record and starts clock)
+DROP FUNCTION IF EXISTS public.start_exam_attempt(UUID, TEXT);
+DROP FUNCTION IF EXISTS public.start_exam_attempt(UUID);
 CREATE OR REPLACE FUNCTION public.start_exam_attempt(
     p_test_id UUID,
     p_action TEXT DEFAULT 'begin'
@@ -193,6 +195,8 @@ GRANT EXECUTE ON FUNCTION public.start_exam_attempt(UUID, TEXT) TO authenticated
 -- 4. Atomic Server-Side Grading RPC: grade_and_submit_exam
 -- Accepts p_reason ('student_submitted', 'time_expired', 'strike_limit_exceeded')
 -- Enforces duration + 15 seconds grace period
+DROP FUNCTION IF EXISTS public.grade_and_submit_exam(UUID, JSONB, TEXT);
+DROP FUNCTION IF EXISTS public.grade_and_submit_exam(UUID, JSONB);
 CREATE OR REPLACE FUNCTION public.grade_and_submit_exam(
     p_test_id UUID,
     p_answers JSONB,

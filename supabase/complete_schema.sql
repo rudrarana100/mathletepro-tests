@@ -420,6 +420,8 @@ USING (public.is_admin());
 -- ----------------------------------------------------------------
 -- 9. Atomic Attempt Starter RPC: start_exam_attempt
 -- ----------------------------------------------------------------
+DROP FUNCTION IF EXISTS public.start_exam_attempt(UUID, TEXT);
+DROP FUNCTION IF EXISTS public.start_exam_attempt(UUID);
 CREATE OR REPLACE FUNCTION public.start_exam_attempt(
     p_test_id UUID,
     p_action TEXT DEFAULT 'begin'
@@ -587,6 +589,8 @@ GRANT EXECUTE ON FUNCTION public.start_exam_attempt(UUID, TEXT) TO authenticated
 -- ----------------------------------------------------------------
 -- 10. Atomic Server-Side Grading RPC: grade_and_submit_exam
 -- ----------------------------------------------------------------
+DROP FUNCTION IF EXISTS public.grade_and_submit_exam(UUID, JSONB, TEXT);
+DROP FUNCTION IF EXISTS public.grade_and_submit_exam(UUID, JSONB);
 CREATE OR REPLACE FUNCTION public.grade_and_submit_exam(
     p_test_id UUID,
     p_answers JSONB,
@@ -739,6 +743,7 @@ GRANT EXECUTE ON FUNCTION public.get_admin_dashboard_stats() TO authenticated;
 -- ----------------------------------------------------------------
 -- 11. Test Result Ranking and Percentile Function
 -- ----------------------------------------------------------------
+DROP FUNCTION IF EXISTS public.get_test_result_ranking(UUID);
 CREATE OR REPLACE FUNCTION public.get_test_result_ranking(p_result_id UUID)
 RETURNS JSONB
 LANGUAGE plpgsql
