@@ -607,7 +607,7 @@ export default function AdminDashboard({
       await fetchAdminData();
       success("Test deleted successfully.");
     } catch (err) {
-      toastError("Failed to delete test: " + (err instanceof Error ? err.message : "Unknown error"));
+      toastError("Failed to delete test: " + getErrorMessage(err));
     }
   };
 
