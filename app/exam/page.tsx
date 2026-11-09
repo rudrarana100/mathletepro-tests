@@ -11,6 +11,9 @@ import {
   Bookmark,
   HelpCircle,
   Clock,
+  Maximize2,
+  Info,
+  Check,
 } from "lucide-react";
 
 interface Question {
@@ -28,6 +31,7 @@ interface TestMeta {
   duration_minutes: number;
   positive_marks: number;
   negative_marks: number;
+  max_strikes?: number;
 }
 
 interface StrikeWarning {
@@ -42,6 +46,11 @@ function ExamEngineContent() {
   const testId = searchParams.get("testId");
   const router = useRouter();
 
+  // Lifecycle Phase: "loading" | "instructions" | "active"
+  const [examPhase, setExamPhase] = useState<"loading" | "instructions" | "active">("loading");
+  const [isResumed, setIsResumed] = useState(false);
+  const [resumeMinutes, setResumeMinutes] = useState(0);
+
   const [testMeta, setTestMeta] = useState<TestMeta | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -49,15 +58,21 @@ function ExamEngineContent() {
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [review, setReview] = useState<Record<string, boolean>>({});
 
-  const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Timer: wall-clock timestamp driven from server end_time
-  const endTimeRef = useRef<number | null>(null);
+  // Fullscreen state & immunity window
+  const [isFullscreen, setIsFullscreen] = useState(true);
+  const lastFullscreenChangeRef = useRef<number>(0);
+
+  // Monotonic Timer: performance.now() driven, zero drift
+  const initialRemainingSecondsRef = useRef<number>(0);
+  const startPerformanceNowRef = useRef<number>(0);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
 
   // Anti-cheat strikes: strictly visibilitychange only
   const [strikes, setStrikes] = useState<number>(0);
+  const lastHiddenTimeRef = useRef<number>(0);
+  const pendingStrikeRef = useRef<boolean>(false);
   const [warningModal, setWarningModal] = useState<StrikeWarning | null>(null);
   const [isAutoSubmitting, setIsAutoSubmitting] = useState(false);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
@@ -68,104 +83,40 @@ function ExamEngineContent() {
 
   const isSubmitting = useRef(false);
 
-  // 1. Initial Load from Server (Answers strictly omitted by safe view / route)
-  useEffect(() => {
-    if (!testId) {
-      setErrorMessage("No examination selected. Returning to available tests...");
-      setTimeout(() => router.push("/student/tests"), 1500);
-      return;
-    }
-
-    const initExam = async () => {
-      try {
-        setIsLoading(true);
-
-        const res = await fetch("/api/exam/start", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ testId }),
-        });
-
-        const data = await res.json();
-
-        if (data.alreadyCompleted) {
-          router.push(`/results?resultId=${data.resultId}`);
-          return;
-        }
-
-        if (data.error || !data.questions) {
-          setErrorMessage(data.error || "Failed to initialize examination");
-          setIsLoading(false);
-          return;
-        }
-
-        setTestMeta(data.test);
-        setQuestions(data.questions);
-
-        // Pinned server end_time
-        if (data.endTime) {
-          const endMs = new Date(data.endTime).getTime();
-          endTimeRef.current = endMs;
-          const diff = Math.max(0, Math.floor((endMs - Date.now()) / 1000));
-          setTimeLeft(diff);
-        } else if (data.remainingSeconds) {
-          const endMs = Date.now() + data.remainingSeconds * 1000;
-          endTimeRef.current = endMs;
-          setTimeLeft(data.remainingSeconds);
-        }
-
-        // Synchronize strikes
-        const serverStrikes = data.strikes || 0;
-        setStrikes(serverStrikes);
-
-        // Restore cached answers for continuity (in case of tab refresh)
-        const savedAnswers = localStorage.getItem(`mathlete_answers_${testId}`);
-        if (savedAnswers) {
-          try {
-            setAnswers(JSON.parse(savedAnswers));
-          } catch {
-            // ignore malformed cache
-          }
-        }
-
-        const savedReview = localStorage.getItem(`mathlete_review_${testId}`);
-        if (savedReview) {
-          try {
-            setReview(JSON.parse(savedReview));
-          } catch {
-            // ignore
-          }
-        }
-
-        const savedIndex = localStorage.getItem(`mathlete_index_${testId}`);
-        if (savedIndex) {
-          const parsed = parseInt(savedIndex, 10);
-          if (!isNaN(parsed) && parsed >= 0 && parsed < data.questions.length) {
-            setCurrentIndex(parsed);
-          }
-        }
-
-        setIsLoading(false);
-      } catch (err) {
-        console.error("Initialization error:", err);
-        setErrorMessage("Network error connecting to examination server.");
-        setIsLoading(false);
+  // Fullscreen helper
+  const enterFullscreen = useCallback(async () => {
+    try {
+      lastFullscreenChangeRef.current = performance.now();
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen().catch(() => {});
       }
+    } catch {
+      // Browser refused or unsupported - do not block or strike
+    }
+  }, []);
+
+  // Listen to fullscreen changes to update non-blocking banner and immune window
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      lastFullscreenChangeRef.current = performance.now();
+      const inFullscreen = !!(
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement ||
+        (document as any).mozFullScreenElement ||
+        (document as any).msFullscreenElement
+      );
+      setIsFullscreen(inFullscreen);
     };
 
-    initExam();
-  }, [testId, router]);
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
+    };
+  }, []);
 
-  // 2. Persist local student progress
-  useEffect(() => {
-    if (testId && !isLoading) {
-      localStorage.setItem(`mathlete_answers_${testId}`, JSON.stringify(answers));
-      localStorage.setItem(`mathlete_review_${testId}`, JSON.stringify(review));
-      localStorage.setItem(`mathlete_index_${testId}`, currentIndex.toString());
-    }
-  }, [answers, review, currentIndex, testId, isLoading]);
-
-  // 3. Centralized Submission Handler
+  // Centralized Submission Handler
   const handleSubmit = useCallback(async (reason?: string) => {
     if (isSubmitting.current || !testId) return;
     isSubmitting.current = true;
@@ -195,13 +146,16 @@ function ExamEngineContent() {
           localStorage.removeItem(`mathlete_answers_${testId}`);
           localStorage.removeItem(`mathlete_review_${testId}`);
           localStorage.removeItem(`mathlete_index_${testId}`);
+          localStorage.removeItem(`mathlete_strikes_${testId}`);
 
-          router.push(`/results?resultId=${data.resultId}`);
+          const reasonParam = reason === "strike_limit_exceeded" ? "&reason=strike_limit_exceeded" : "";
+          router.push(`/results?resultId=${data.resultId}${reasonParam}`);
           return;
         }
 
         if (data.error && data.alreadyCompleted) {
-          router.push(`/results?resultId=${data.resultId}`);
+          const reasonParam = reason === "strike_limit_exceeded" ? "&reason=strike_limit_exceeded" : "";
+          router.push(`/results?resultId=${data.resultId}${reasonParam}`);
           return;
         }
 
@@ -224,17 +178,163 @@ function ExamEngineContent() {
     setIsAutoSubmitting(false);
   }, [answers, testId, router]);
 
-  // 4. Timer Countdown: driven by server end_time
+  // 1. Initial Load from Server (action: "init" -> loads questions without starting clock if first visit)
   useEffect(() => {
-    if (endTimeRef.current === null || isSubmitting.current || isLoading) return;
+    if (!testId) {
+      setErrorMessage("No examination selected. Returning to available tests...");
+      setTimeout(() => router.push("/student/tests"), 1500);
+      return;
+    }
+
+    const initExam = async () => {
+      try {
+        setExamPhase("loading");
+
+        const res = await fetch("/api/exam/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ testId, action: "init" }),
+        });
+
+        const data = await res.json();
+
+        if (data.alreadyCompleted) {
+          router.push(`/results?resultId=${data.resultId}`);
+          return;
+        }
+
+        if (data.error || !data.questions) {
+          setErrorMessage(data.error || "Failed to initialize examination");
+          return;
+        }
+
+        setTestMeta(data.test);
+        setQuestions(data.questions);
+
+        // Synchronize strikes: higher value between server and localStorage wins
+        const serverStrikes = data.strikes || 0;
+        const localStrikes = parseInt(localStorage.getItem(`mathlete_strikes_${testId}`) || "0", 10);
+        const resolvedStrikes = Math.max(serverStrikes, isNaN(localStrikes) ? 0 : localStrikes);
+        setStrikes(resolvedStrikes);
+        localStorage.setItem(`mathlete_strikes_${testId}`, resolvedStrikes.toString());
+
+        if (resolvedStrikes > serverStrikes) {
+          fetch("/api/exam/strike", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ testId, strikes: resolvedStrikes }),
+          }).catch(console.error);
+        }
+
+        // Restore cached answers for continuity (in case of tab refresh)
+        const savedAnswers = localStorage.getItem(`mathlete_answers_${testId}`);
+        if (savedAnswers) {
+          try {
+            setAnswers(JSON.parse(savedAnswers));
+          } catch {
+            // ignore malformed cache
+          }
+        }
+
+        const savedReview = localStorage.getItem(`mathlete_review_${testId}`);
+        if (savedReview) {
+          try {
+            setReview(JSON.parse(savedReview));
+          } catch {
+            // ignore
+          }
+        }
+
+        const savedIndex = localStorage.getItem(`mathlete_index_${testId}`);
+        if (savedIndex) {
+          const parsed = parseInt(savedIndex, 10);
+          if (!isNaN(parsed) && parsed >= 0 && parsed < data.questions.length) {
+            setCurrentIndex(parsed);
+          }
+        }
+
+        // Check if an unfinished attempt already existed from an earlier visit
+        if (data.hasActiveAttempt) {
+          const remSec = typeof data.remainingSeconds === "number" ? data.remainingSeconds : (data.test.duration_minutes || 60) * 60;
+          initialRemainingSecondsRef.current = remSec;
+          startPerformanceNowRef.current = performance.now();
+          setTimeLeft(remSec);
+          setIsResumed(true);
+          setResumeMinutes(Math.max(1, Math.ceil(remSec / 60)));
+          setExamPhase("active");
+        } else {
+          // First visit: wait for student to click "Begin exam" on instructions screen
+          const initialSec = (data.test.duration_minutes || 60) * 60;
+          initialRemainingSecondsRef.current = initialSec;
+          setTimeLeft(initialSec);
+          setExamPhase("instructions");
+        }
+      } catch (err) {
+        console.error("Initialization error:", err);
+        setErrorMessage("Network error connecting to examination server.");
+      }
+    };
+
+    initExam();
+  }, [testId, router]);
+
+  // Handler for student clicking "Begin exam" on Instructions screen
+  const handleBeginExam = async () => {
+    try {
+      enterFullscreen();
+
+      // Start attempt on server and pin started_at
+      const res = await fetch("/api/exam/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ testId, action: "begin" }),
+      });
+
+      const data = await res.json();
+
+      if (data.alreadyCompleted) {
+        router.push(`/results?resultId=${data.resultId}`);
+        return;
+      }
+
+      if (data.success) {
+        const remSec = typeof data.remainingSeconds === "number" ? data.remainingSeconds : (testMeta?.duration_minutes || 60) * 60;
+        initialRemainingSecondsRef.current = remSec;
+        startPerformanceNowRef.current = performance.now();
+        setTimeLeft(remSec);
+        setExamPhase("active");
+      } else {
+        // Fallback: start timer with loaded initial duration
+        startPerformanceNowRef.current = performance.now();
+        setExamPhase("active");
+      }
+    } catch (err) {
+      console.error("Error beginning exam attempt:", err);
+      startPerformanceNowRef.current = performance.now();
+      setExamPhase("active");
+    }
+  };
+
+  // 2. Persist local student progress
+  useEffect(() => {
+    if (testId && examPhase === "active") {
+      localStorage.setItem(`mathlete_answers_${testId}`, JSON.stringify(answers));
+      localStorage.setItem(`mathlete_review_${testId}`, JSON.stringify(review));
+      localStorage.setItem(`mathlete_index_${testId}`, currentIndex.toString());
+    }
+  }, [answers, review, currentIndex, testId, examPhase]);
+
+  // 3. Monotonic Timer Countdown (driven by performance.now() - immune to system clock shifts)
+  useEffect(() => {
+    if (examPhase !== "active" || isSubmitting.current) return;
 
     const tick = () => {
-      if (endTimeRef.current === null) return;
-      const now = Date.now();
-      const diff = Math.max(0, Math.floor((endTimeRef.current - now) / 1000));
-      setTimeLeft(diff);
+      if (startPerformanceNowRef.current === 0) return;
+      const elapsedSeconds = (performance.now() - startPerformanceNowRef.current) / 1000;
+      const remaining = Math.max(0, Math.floor(initialRemainingSecondsRef.current - elapsedSeconds));
+      setTimeLeft(remaining);
 
-      if (diff <= 0) {
+      if (remaining <= 0) {
         handleSubmit("time_expired");
       }
     };
@@ -242,69 +342,85 @@ function ExamEngineContent() {
     tick();
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
-  }, [isLoading, handleSubmit]);
+  }, [examPhase, handleSubmit]);
 
-  // 5. Anti-Cheat: VisibilityChange ONLY (no false positives on fullscreen exit)
-  const triggerStrike = useCallback((reasonDesc: string) => {
-    if (isSubmitting.current || isLoading || !testId) return;
-
-    setStrikes((prevStrikes) => {
-      const nextStrike = prevStrikes + 1;
-
-      // Persist strike count on server
-      fetch("/api/exam/strike", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ testId, strikes: nextStrike }),
-      }).catch(console.error);
-
-      if (nextStrike === 1) {
-        setWarningModal({
-          open: true,
-          strikeNumber: 1,
-          title: "Security notice (Strike 1 of 3)",
-          message: `${reasonDesc} Navigating away from the examination window 2 more times will trigger automatic submission.`,
-        });
-      } else if (nextStrike === 2) {
-        setWarningModal({
-          open: true,
-          strikeNumber: 2,
-          title: "Final security warning (Strike 2 of 3)",
-          message: `${reasonDesc} This is your final warning. Any further navigation outside this window will immediately submit your examination.`,
-        });
-      } else if (nextStrike >= 3) {
-        setWarningModal({
-          open: true,
-          strikeNumber: 3,
-          title: "Examination terminated (Strike 3 of 3)",
-          message:
-            "Maximum security strikes exceeded. Your responses are locked and being submitted to faculty.",
-        });
-        setIsAutoSubmitting(true);
-        setTimeout(() => {
-          handleSubmit("strike_limit_exceeded");
-        }, 1200);
-      }
-
-      return nextStrike;
-    });
-  }, [isLoading, testId, handleSubmit]);
-
+  // 4. Anti-Cheat: document "visibilitychange" with visibilityState === "hidden" ONLY
   useEffect(() => {
-    if (isLoading || isSubmitting.current || !testId) return;
+    if (examPhase !== "active" || isSubmitting.current || !testId) return;
+
+    const maxStrikes = testMeta?.max_strikes ?? 3;
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
-        triggerStrike(
-          "Tab switch or window minimizing detected. Examination focus is strictly monitored."
-        );
-      } else {
-        // When tab regains focus, immediately synchronize wall-clock time
-        if (endTimeRef.current) {
-          const diff = Math.max(0, Math.floor((endTimeRef.current - Date.now()) / 1000));
-          setTimeLeft(diff);
-          if (diff <= 0) {
+        // Tab-switch checking disabled if maxStrikes === 0
+        if (maxStrikes <= 0) return;
+
+        const now = performance.now();
+
+        // PART 2.3: Ignore visibility events within 2 seconds of a fullscreenchange event
+        if (now - lastFullscreenChangeRef.current < 2000) return;
+
+        // PART 2.3: Debounce hide events (at least 1 second per hide/show cycle)
+        if (now - lastHiddenTimeRef.current < 1000) return;
+
+        lastHiddenTimeRef.current = now;
+        pendingStrikeRef.current = true;
+
+        // Record strike count immediately to server and local storage
+        setStrikes((prevStrikes) => {
+          const nextStrike = prevStrikes + 1;
+          localStorage.setItem(`mathlete_strikes_${testId}`, nextStrike.toString());
+
+          fetch("/api/exam/strike", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ testId, strikes: nextStrike }),
+          }).catch(console.error);
+
+          return nextStrike;
+        });
+      } else if (document.visibilityState === "visible") {
+        // Tab regained focus: immediately recalculate monotonic timer to correct any background throttling
+        if (startPerformanceNowRef.current > 0) {
+          const elapsedSeconds = (performance.now() - startPerformanceNowRef.current) / 1000;
+          const remaining = Math.max(0, Math.floor(initialRemainingSecondsRef.current - elapsedSeconds));
+          setTimeLeft(remaining);
+          if (remaining <= 0) {
             handleSubmit("time_expired");
+            return;
+          }
+        }
+
+        // Handle strike modal or auto-submission on return
+        if (pendingStrikeRef.current) {
+          pendingStrikeRef.current = false;
+          const localStored = parseInt(localStorage.getItem(`mathlete_strikes_${testId}`) || "0", 10);
+          const currentStrikes = Math.max(strikes, isNaN(localStored) ? 0 : localStored);
+
+          if (currentStrikes >= maxStrikes && maxStrikes > 0) {
+            // Auto-submit happens ONLY when strikes reach max_strikes
+            setWarningModal({
+              open: true,
+              strikeNumber: currentStrikes,
+              title: `Examination terminated (Strike ${currentStrikes} of ${maxStrikes})`,
+              message:
+                "You left the exam window too many times. Your responses are locked and being submitted.",
+            });
+            setIsAutoSubmitting(true);
+            setTimeout(() => {
+              handleSubmit("strike_limit_exceeded");
+            }, 1200);
+          } else if (currentStrikes > 0) {
+            const remainingAllowed = maxStrikes - currentStrikes;
+            setWarningModal({
+              open: true,
+              strikeNumber: currentStrikes,
+              title:
+                currentStrikes === 1
+                  ? `Security notice (Strike 1 of ${maxStrikes})`
+                  : `Security warning (Strike ${currentStrikes} of ${maxStrikes})`,
+              message: `We record when you leave the exam window. Leaving the window ${remainingAllowed} more ${remainingAllowed === 1 ? "time" : "times"} will submit your test automatically.`,
+            });
           }
         }
       }
@@ -314,7 +430,7 @@ function ExamEngineContent() {
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [isLoading, testId, triggerStrike, handleSubmit]);
+  }, [examPhase, testId, strikes, testMeta?.max_strikes, handleSubmit]);
 
   const handleSelectOption = useCallback((qId: string, optIndex: number) => {
     setAnswers((prev) => ({ ...prev, [qId]: optIndex }));
@@ -338,7 +454,7 @@ function ExamEngineContent() {
 
   // Keyboard Shortcuts: [1-4] Option, [N] Next, [P] Prev, [M] Review
   useEffect(() => {
-    if (isLoading || isSubmitting.current || questions.length === 0) return;
+    if (examPhase !== "active" || isSubmitting.current || questions.length === 0) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
@@ -371,19 +487,21 @@ function ExamEngineContent() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isLoading, currentIndex, questions, warningModal, isConfirmOpen, handleSelectOption, handleMarkReview]);
+  }, [examPhase, currentIndex, questions, warningModal, isConfirmOpen, handleSelectOption, handleMarkReview]);
 
-  if (isLoading) {
+  // Loading Screen
+  if (examPhase === "loading") {
     return (
       <div className="flex flex-col min-h-screen items-center justify-center bg-black text-zinc-100 space-y-3 font-sans">
         <div className="w-6 h-6 border-2 border-zinc-700 border-t-zinc-200 animate-spin rounded-full" />
         <div className="text-sm text-zinc-400 font-normal">
-          Initializing examination session...
+          Preparing examination environment...
         </div>
       </div>
     );
   }
 
+  // Error Screen
   if (errorMessage || questions.length === 0) {
     return (
       <div className="flex flex-col min-h-screen items-center justify-center bg-black text-zinc-100 p-6 font-sans">
@@ -406,6 +524,99 @@ function ExamEngineContent() {
     );
   }
 
+  const maxStrikes = testMeta?.max_strikes ?? 3;
+
+  // Instructions Screen (shown only when student has not yet started this exam)
+  if (examPhase === "instructions") {
+    return (
+      <div className="min-h-screen bg-black text-zinc-100 flex flex-col items-center justify-center p-4 sm:p-6 font-sans">
+        <div className="max-w-lg w-full bg-zinc-950 border border-zinc-800 rounded-xl p-6 sm:p-8 space-y-6 shadow-2xl animate-in fade-in duration-150">
+          <div className="space-y-2 border-b border-zinc-800 pb-5">
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-[11px] font-medium bg-zinc-900 border border-zinc-800 text-zinc-400">
+              <Info className="w-3 h-3 text-zinc-400" />
+              <span>Instructions & guidelines</span>
+            </div>
+            <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-zinc-100">
+              {testMeta?.title || "Examination"}
+            </h1>
+            <p className="text-xs text-zinc-400 font-normal">
+              Review examination parameters before initiating your attempt
+            </p>
+          </div>
+
+          {/* Test Meta Parameters */}
+          <div className="grid grid-cols-3 gap-2.5 text-center">
+            <div className="p-3 rounded-lg bg-zinc-900/60 border border-zinc-800">
+              <div className="flex items-center justify-center gap-1 text-zinc-400 text-xs font-normal mb-1">
+                <Clock className="w-3.5 h-3.5 text-zinc-500" /> Duration
+              </div>
+              <div className="text-lg font-semibold text-zinc-100 tabular-nums">
+                {testMeta?.duration_minutes}m
+              </div>
+            </div>
+
+            <div className="p-3 rounded-lg bg-zinc-900/60 border border-zinc-800">
+              <div className="flex items-center justify-center gap-1 text-zinc-400 text-xs font-normal mb-1">
+                <HelpCircle className="w-3.5 h-3.5 text-zinc-500" /> Questions
+              </div>
+              <div className="text-lg font-semibold text-zinc-100 tabular-nums">
+                {questions.length}
+              </div>
+            </div>
+
+            <div className="p-3 rounded-lg bg-zinc-900/60 border border-zinc-800">
+              <div className="flex items-center justify-center gap-1 text-zinc-400 text-xs font-normal mb-1">
+                <Check className="w-3.5 h-3.5 text-zinc-500" /> Marking
+              </div>
+              <div className="text-lg font-semibold text-zinc-100 tabular-nums">
+                +{testMeta?.positive_marks ?? 4} / -{testMeta?.negative_marks ?? 1}
+              </div>
+            </div>
+          </div>
+
+          {/* Guidelines List */}
+          <div className="space-y-3 text-xs text-zinc-300 font-normal border-t border-zinc-900 pt-5">
+            <div className="flex items-start gap-2.5">
+              <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 mt-1.5 shrink-0" />
+              <span>
+                Your countdown timer begins only when you click <strong>Begin exam</strong>.
+              </span>
+            </div>
+            <div className="flex items-start gap-2.5">
+              <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 mt-1.5 shrink-0" />
+              <span>
+                All questions and mathematical notation have been loaded into local memory.
+              </span>
+            </div>
+            <div className="flex items-start gap-2.5">
+              <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 mt-1.5 shrink-0" />
+              {maxStrikes > 0 ? (
+                <span>
+                  <strong>Security notice:</strong> We record when you leave the exam window. Leaving the window more than {maxStrikes} times will submit your test automatically.
+                </span>
+              ) : (
+                <span>
+                  Tab-switch checking is disabled for this examination.
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="pt-2">
+            <Button
+              onClick={handleBeginExam}
+              className="w-full h-11 rounded-lg bg-zinc-100 text-zinc-950 hover:bg-white text-sm font-medium transition-colors flex items-center justify-center gap-2"
+            >
+              <span>Begin exam</span>
+              <Maximize2 className="w-4 h-4 text-zinc-700" />
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Active Examination Viewport
   const currentQ = questions[currentIndex];
   let parsedOptions: string[] = [];
   try {
@@ -429,6 +640,41 @@ function ExamEngineContent() {
 
   return (
     <div className="min-h-screen bg-black text-zinc-100 flex flex-col font-sans selection:bg-zinc-800 selection:text-white">
+      {/* Non-blocking Banner: Left Fullscreen */}
+      {!isFullscreen && (
+        <div className="bg-zinc-900 border-b border-zinc-800 text-zinc-300 px-4 py-2 text-xs flex items-center justify-between z-20 animate-in fade-in duration-150">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+            <span>You left fullscreen. Click to return</span>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={enterFullscreen}
+            className="h-7 px-3 text-xs border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200"
+          >
+            Re-enter fullscreen
+          </Button>
+        </div>
+      )}
+
+      {/* Non-blocking Banner: Resumed session */}
+      {isResumed && (
+        <div className="bg-emerald-950/40 border-b border-emerald-500/30 text-emerald-300 px-4 py-2 text-xs flex items-center justify-between z-20 animate-in fade-in duration-150">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <span>Resuming your exam, {resumeMinutes} minutes left</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsResumed(false)}
+            className="text-xs text-emerald-400 hover:text-white"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Distraction-Free Header */}
       <header className="h-16 border-b border-zinc-800 flex items-center justify-between px-4 sm:px-6 bg-zinc-950 sticky top-0 z-30">
         <div className="flex items-center gap-3 truncate">
@@ -446,23 +692,25 @@ function ExamEngineContent() {
         </div>
 
         <div className="flex items-center gap-3 sm:gap-4 text-sm">
-          {/* Strikes Counter */}
-          <div
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium transition-colors ${
-              strikes === 0
-                ? "border-zinc-800 bg-zinc-900/40 text-zinc-400"
-                : strikes === 1
-                ? "border-yellow-500/30 bg-yellow-950/20 text-yellow-400"
-                : "border-red-500/40 bg-red-950/30 text-red-400"
-            }`}
-          >
-            <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
-            <span>
-              {strikes} / 3 strikes
-            </span>
-          </div>
+          {/* Strikes Counter (only shown when max_strikes > 0) */}
+          {maxStrikes > 0 && (
+            <div
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium transition-colors ${
+                strikes === 0
+                  ? "border-zinc-800 bg-zinc-900/40 text-zinc-400"
+                  : strikes === 1
+                  ? "border-yellow-500/30 bg-yellow-950/20 text-yellow-400"
+                  : "border-red-500/40 bg-red-950/30 text-red-400"
+              }`}
+            >
+              <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
+              <span>
+                {strikes} / {maxStrikes} strikes
+              </span>
+            </div>
+          )}
 
-          {/* Countdown Timer (Monospace permitted) */}
+          {/* Countdown Timer (Monospace, monotonic performance.now() driven) */}
           <div
             className={`font-mono tabular-nums px-3 py-1 rounded-md border text-sm font-semibold transition-colors ${
               isUrgentTimer
@@ -632,7 +880,7 @@ function ExamEngineContent() {
               <span><kbd className="text-zinc-400 border border-zinc-800 px-1 py-0.5 rounded bg-zinc-900">P</kbd> Previous</span>
               <span><kbd className="text-zinc-400 border border-zinc-800 px-1 py-0.5 rounded bg-zinc-900">M</kbd> Mark review</span>
             </div>
-            <span>Distraction-free proctored mode</span>
+            <span>Monitored examination session</span>
           </div>
         </main>
 
@@ -791,7 +1039,7 @@ function ExamEngineContent() {
             </p>
 
             <div className="pt-2">
-              {warningModal.strikeNumber < 3 ? (
+              {warningModal.strikeNumber < maxStrikes ? (
                 <Button
                   onClick={() => setWarningModal(null)}
                   className="w-full rounded-md bg-red-600 hover:bg-red-500 text-white text-sm font-medium h-9 transition-colors"
