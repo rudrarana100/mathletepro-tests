@@ -12,6 +12,7 @@ import {
   HelpCircle,
   Clock,
   Maximize2,
+  Minimize2,
   Info,
   Check,
 } from "lucide-react";
@@ -83,15 +84,70 @@ function ExamEngineContent() {
 
   const isSubmitting = useRef(false);
 
-  // Fullscreen helper
-  const enterFullscreen = useCallback(async () => {
+  // Fullscreen helpers (synchronous, cross-browser webkit/moz/ms fallbacks, never blocks exam)
+  const requestFullscreenSync = useCallback(() => {
     try {
       lastFullscreenChangeRef.current = performance.now();
-      if (!document.fullscreenElement) {
-        await document.documentElement.requestFullscreen().catch(() => {});
+      const doc = document as any;
+      const inFs = !!(
+        doc.fullscreenElement ||
+        doc.webkitFullscreenElement ||
+        doc.mozFullScreenElement ||
+        doc.msFullscreenElement
+      );
+
+      if (!inFs) {
+        const docEl = document.documentElement as any;
+        if (typeof docEl.requestFullscreen === "function") {
+          docEl.requestFullscreen().catch(() => {});
+        } else if (typeof docEl.webkitRequestFullscreen === "function") {
+          docEl.webkitRequestFullscreen();
+        } else if (typeof docEl.mozRequestFullScreen === "function") {
+          docEl.mozRequestFullScreen();
+        } else if (typeof docEl.msRequestFullscreen === "function") {
+          docEl.msRequestFullscreen();
+        }
       }
     } catch {
-      // Browser refused or unsupported - do not block or strike
+      // Browser refused or unsupported (e.g. iOS Safari) - never block or strike
+    }
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    try {
+      lastFullscreenChangeRef.current = performance.now();
+      const doc = document as any;
+      const docEl = document.documentElement as any;
+      const inFs = !!(
+        doc.fullscreenElement ||
+        doc.webkitFullscreenElement ||
+        doc.mozFullScreenElement ||
+        doc.msFullscreenElement
+      );
+
+      if (!inFs) {
+        if (typeof docEl.requestFullscreen === "function") {
+          docEl.requestFullscreen().catch(() => {});
+        } else if (typeof docEl.webkitRequestFullscreen === "function") {
+          docEl.webkitRequestFullscreen();
+        } else if (typeof docEl.mozRequestFullScreen === "function") {
+          docEl.mozRequestFullScreen();
+        } else if (typeof docEl.msRequestFullscreen === "function") {
+          docEl.msRequestFullscreen();
+        }
+      } else {
+        if (typeof doc.exitFullscreen === "function") {
+          doc.exitFullscreen().catch(() => {});
+        } else if (typeof doc.webkitExitFullscreen === "function") {
+          doc.webkitExitFullscreen();
+        } else if (typeof doc.mozCancelFullScreen === "function") {
+          doc.mozCancelFullScreen();
+        } else if (typeof doc.msExitFullscreen === "function") {
+          doc.msExitFullscreen();
+        }
+      }
+    } catch {
+      // Silently ignore
     }
   }, []);
 
@@ -279,40 +335,46 @@ function ExamEngineContent() {
   }, [testId, router]);
 
   // Handler for student clicking "Begin exam" on Instructions screen
-  const handleBeginExam = async () => {
-    try {
-      enterFullscreen();
+  const handleBeginExam = () => {
+    // 1. Synchronously trigger fullscreen inside user click event loop BEFORE any await
+    requestFullscreenSync();
 
-      // Start attempt on server and pin started_at
-      const res = await fetch("/api/exam/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ testId, action: "begin" }),
-      });
+    // 2. Start attempt on server and transition phase on the same page
+    (async () => {
+      try {
+        const res = await fetch("/api/exam/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ testId, action: "begin" }),
+        });
 
-      const data = await res.json();
+        const data = await res.json();
 
-      if (data.alreadyCompleted) {
-        router.push(`/results?resultId=${data.resultId}`);
-        return;
-      }
+        if (data.alreadyCompleted) {
+          router.push(`/results?resultId=${data.resultId}`);
+          return;
+        }
 
-      if (data.success) {
-        const remSec = typeof data.remainingSeconds === "number" ? data.remainingSeconds : (testMeta?.duration_minutes || 60) * 60;
-        initialRemainingSecondsRef.current = remSec;
+        if (data.success) {
+          const remSec =
+            typeof data.remainingSeconds === "number"
+              ? data.remainingSeconds
+              : (testMeta?.duration_minutes || 60) * 60;
+          initialRemainingSecondsRef.current = remSec;
+          startPerformanceNowRef.current = performance.now();
+          setTimeLeft(remSec);
+          setExamPhase("active");
+        } else {
+          // Fallback: start timer with loaded initial duration
+          startPerformanceNowRef.current = performance.now();
+          setExamPhase("active");
+        }
+      } catch (err) {
+        console.error("Error beginning exam attempt:", err);
         startPerformanceNowRef.current = performance.now();
-        setTimeLeft(remSec);
-        setExamPhase("active");
-      } else {
-        // Fallback: start timer with loaded initial duration
-        startPerformanceNowRef.current = performance.now();
         setExamPhase("active");
       }
-    } catch (err) {
-      console.error("Error beginning exam attempt:", err);
-      startPerformanceNowRef.current = performance.now();
-      setExamPhase("active");
-    }
+    })();
   };
 
   // 2. Persist local student progress
@@ -645,15 +707,15 @@ function ExamEngineContent() {
         <div className="bg-zinc-900 border-b border-zinc-800 text-zinc-300 px-4 py-2 text-xs flex items-center justify-between z-20 animate-in fade-in duration-150">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-            <span>You left fullscreen. Click to return</span>
+            <span>You left fullscreen</span>
           </div>
           <Button
             size="sm"
             variant="outline"
-            onClick={enterFullscreen}
-            className="h-7 px-3 text-xs border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200"
+            onClick={requestFullscreenSync}
+            className="h-7 px-3 text-xs border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-medium"
           >
-            Re-enter fullscreen
+            Enter fullscreen
           </Button>
         </div>
       )}
@@ -722,6 +784,21 @@ function ExamEngineContent() {
               ? `${String(minutesRemaining).padStart(2, "0")}:${String(secondsRemaining).padStart(2, "0")}`
               : "00:00"}
           </div>
+
+          {/* Fullscreen Toggle Button */}
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+            aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+            className="p-2 rounded-md border border-zinc-800 bg-zinc-900/60 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+          >
+            {isFullscreen ? (
+              <Minimize2 className="w-4 h-4" />
+            ) : (
+              <Maximize2 className="w-4 h-4" />
+            )}
+          </button>
 
           {/* Question Counter (Desktop) */}
           <div className="hidden md:block text-xs text-zinc-400 font-normal">
