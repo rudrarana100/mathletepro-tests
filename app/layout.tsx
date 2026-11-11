@@ -16,6 +16,10 @@ export const metadata: Metadata = {
   },
   description: "Online test series and competitive examination portal for advanced mathematics.",
   metadataBase: new URL("http://localhost:3000"),
+  icons: {
+    icon: "/logo.png",
+    apple: "/logo.png",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

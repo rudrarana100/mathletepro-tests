@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import CommandMenu from "@/components/CommandMenu";
@@ -91,9 +92,14 @@ export default function AdminSidebar({
       {/* Mobile Top Navbar with Hamburger */}
       <div className="md:hidden flex items-center justify-between px-4 py-3 border-b border-zinc-800 bg-zinc-950 sticky top-0 z-40">
         <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded bg-zinc-100 text-zinc-950 font-semibold text-xs flex items-center justify-center">
-            M
-          </div>
+          <Image
+            src="/logo.png"
+            alt="Mathlete Pro"
+            width={24}
+            height={24}
+            className="w-6 h-6 rounded-full object-contain shrink-0"
+            priority
+          />
           <span className="font-semibold tracking-tight text-sm text-zinc-100">Mathlete Pro</span>
           <span className="text-[10px] text-emerald-400 font-medium px-1.5 py-0.5 border border-emerald-500/20 bg-emerald-950/20 rounded-sm uppercase tracking-wider">
             Faculty
@@ -130,12 +136,21 @@ export default function AdminSidebar({
           >
             <div className="space-y-6">
               <div className="flex items-center justify-between pb-4 border-b border-zinc-900">
-                <div>
-                  <div className="text-base font-semibold tracking-tight text-zinc-100">
-                    Mathlete Pro
-                  </div>
-                  <div className="text-xs text-zinc-500 font-normal">
-                    Dashboard
+                <div className="flex items-center gap-2.5">
+                  <Image
+                    src="/logo.png"
+                    alt="Mathlete Pro"
+                    width={28}
+                    height={28}
+                    className="w-7 h-7 rounded-full object-contain shrink-0"
+                  />
+                  <div>
+                    <div className="text-base font-semibold tracking-tight text-zinc-100">
+                      Mathlete Pro
+                    </div>
+                    <div className="text-xs text-zinc-500 font-normal">
+                      Dashboard
+                    </div>
                   </div>
                 </div>
                 <button
@@ -210,10 +225,15 @@ export default function AdminSidebar({
           {/* Header & Toggle */}
           <div className="flex items-center justify-between pb-4 border-b border-zinc-900">
             {!isCollapsed && (
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded bg-zinc-100 text-zinc-950 font-semibold text-xs flex items-center justify-center">
-                  M
-                </div>
+              <div className="flex items-center gap-2.5">
+                <Image
+                  src="/logo.png"
+                  alt="Mathlete Pro"
+                  width={28}
+                  height={28}
+                  className="w-7 h-7 rounded-full object-contain shrink-0"
+                  priority
+                />
                 <div>
                   <div className="text-sm font-semibold tracking-tight text-zinc-100">
                     Mathlete Pro

@@ -70,7 +70,7 @@ CREATE TRIGGER tr_check_profile_role
     BEFORE UPDATE ON public.profiles
     FOR EACH ROW EXECUTE FUNCTION public.check_profile_role_update();
 
--- Auto-create profile on signup (always student)
+-- Auto-create profile on signup (assign admin if designated admin email, otherwise student)
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS trigger AS $$
 BEGIN
@@ -78,10 +78,18 @@ BEGIN
     VALUES (
         new.id,
         new.email,
-        'student',
+        CASE 
+            WHEN LOWER(new.email) IN ('bilalmathelte@gmail.com', 'bilalmathlete@gmail.com') THEN 'admin'
+            ELSE 'student'
+        END,
         COALESCE(new.raw_user_meta_data->>'full_name', split_part(new.email, '@', 1))
     )
-    ON CONFLICT (id) DO NOTHING;
+    ON CONFLICT (id) DO UPDATE
+    SET 
+        role = CASE 
+            WHEN LOWER(EXCLUDED.email) IN ('bilalmathelte@gmail.com', 'bilalmathlete@gmail.com') THEN 'admin'
+            ELSE profiles.role
+        END;
     RETURN new;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;

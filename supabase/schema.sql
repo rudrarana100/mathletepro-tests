@@ -84,10 +84,18 @@ BEGIN
     VALUES (
         new.id,
         new.email,
-        'student',
+        CASE 
+            WHEN LOWER(new.email) IN ('bilalmathelte@gmail.com', 'bilalmathlete@gmail.com') THEN 'admin'
+            ELSE 'student'
+        END,
         COALESCE(new.raw_user_meta_data->>'full_name', split_part(new.email, '@', 1))
     )
-    ON CONFLICT (id) DO NOTHING;
+    ON CONFLICT (id) DO UPDATE
+    SET 
+        role = CASE 
+            WHEN LOWER(EXCLUDED.email) IN ('bilalmathelte@gmail.com', 'bilalmathlete@gmail.com') THEN 'admin'
+            ELSE profiles.role
+        END;
     RETURN new;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;

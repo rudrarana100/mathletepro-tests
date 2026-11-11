@@ -3,6 +3,7 @@
 import { useEffect, useState, Suspense, useRef, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import Image from "next/image";
 import { MathRenderer } from "@/components/MathRenderer";
 import {
   AlertTriangle,
@@ -740,9 +741,14 @@ function ExamEngineContent() {
       {/* Distraction-Free Header */}
       <header className="h-16 border-b border-zinc-800 flex items-center justify-between px-4 sm:px-6 bg-zinc-950 sticky top-0 z-30">
         <div className="flex items-center gap-3 truncate">
-          <div className="w-6 h-6 rounded bg-zinc-100 text-zinc-950 font-semibold text-xs flex items-center justify-center shrink-0">
-            M
-          </div>
+          <Image
+            src="/logo.png"
+            alt="Mathlete Pro"
+            width={28}
+            height={28}
+            className="w-7 h-7 rounded-full object-contain shrink-0"
+            priority
+          />
           <div className="truncate">
             <h1 className="text-sm font-semibold tracking-tight text-zinc-100 truncate">
               {testMeta?.title || "Examination"}

@@ -13,6 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -82,9 +83,14 @@ export function SignUpForm({
       <Card className="rounded-lg border-zinc-800 bg-zinc-950 text-zinc-100 shadow-xl">
         <CardHeader className="space-y-1.5 pb-4">
           <div className="flex items-center gap-2 mb-1">
-            <div className="w-6 h-6 rounded bg-zinc-100 text-zinc-950 font-semibold text-xs flex items-center justify-center">
-              M
-            </div>
+            <Image
+              src="/logo.png"
+              alt="Mathlete Pro"
+              width={24}
+              height={24}
+              className="w-6 h-6 rounded-full object-contain shrink-0"
+              priority
+            />
             <span className="text-sm font-semibold tracking-tight text-zinc-200">
               Mathlete Pro
             </span>

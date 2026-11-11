@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import CommandMenu from "@/components/CommandMenu";
@@ -82,9 +83,14 @@ export default function StudentSidebar({
       {/* Mobile Top Navbar with Hamburger */}
       <div className="md:hidden flex items-center justify-between px-4 py-3 border-b border-zinc-800 bg-zinc-950 sticky top-0 z-40">
         <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded bg-zinc-100 text-zinc-950 font-semibold text-xs flex items-center justify-center">
-            M
-          </div>
+          <Image
+            src="/logo.png"
+            alt="Mathlete Pro"
+            width={24}
+            height={24}
+            className="w-6 h-6 rounded-full object-contain shrink-0"
+            priority
+          />
           <span className="font-semibold tracking-tight text-sm text-zinc-100">Mathlete Pro</span>
         </div>
 
@@ -111,8 +117,17 @@ export default function StudentSidebar({
           >
             <div className="space-y-6">
               <div className="flex items-center justify-between pb-4 border-b border-zinc-900">
-                <div className="text-base font-semibold tracking-tight text-zinc-100">
-                  Mathlete Pro
+                <div className="flex items-center gap-2.5">
+                  <Image
+                    src="/logo.png"
+                    alt="Mathlete Pro"
+                    width={28}
+                    height={28}
+                    className="w-7 h-7 rounded-full object-contain shrink-0"
+                  />
+                  <div className="text-base font-semibold tracking-tight text-zinc-100">
+                    Mathlete Pro
+                  </div>
                 </div>
                 <button
                   onClick={() => setIsMobileOpen(false)}
@@ -183,10 +198,15 @@ export default function StudentSidebar({
           {/* Header & Toggle */}
           <div className="flex items-center justify-between pb-4 border-b border-zinc-900">
             {!isCollapsed && (
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded bg-zinc-100 text-zinc-950 font-semibold text-xs flex items-center justify-center">
-                  M
-                </div>
+              <div className="flex items-center gap-2.5">
+                <Image
+                  src="/logo.png"
+                  alt="Mathlete Pro"
+                  width={28}
+                  height={28}
+                  className="w-7 h-7 rounded-full object-contain shrink-0"
+                  priority
+                />
                 <div className="text-sm font-semibold tracking-tight text-zinc-100">
                   Mathlete Pro
                 </div>
